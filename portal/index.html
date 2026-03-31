@@ -6,67 +6,265 @@
   <title>个人工作台</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
       min-height: 100vh;
-      background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+      overflow: hidden;
+      color: #3a3a3a;
+    }
+
+    /* 山水背景层 */
+    .bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      background: linear-gradient(180deg, #e8dfd0 0%, #d4c8b0 30%, #c2b89e 50%, #b8c4b0 70%, #9ab09a 100%);
+    }
+
+    /* SVG 山水画 */
+    .mountains {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 60vh;
+      z-index: 1;
+    }
+
+    /* 雾气动画 */
+    .mist {
+      position: fixed;
+      width: 200%;
+      height: 120px;
+      z-index: 2;
+      opacity: 0.4;
+      animation: drift 30s linear infinite;
+    }
+    .mist-1 { bottom: 25vh; }
+    .mist-2 { bottom: 40vh; animation-duration: 45s; animation-direction: reverse; opacity: 0.25; }
+
+    @keyframes drift {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+
+    /* 内容层 */
+    .content {
+      position: relative;
+      z-index: 10;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      color: #fff;
+      padding-top: 12vh;
     }
-    h1 { font-size: 2.2rem; margin-bottom: 0.5rem; font-weight: 300; }
-    .subtitle { color: rgba(255,255,255,0.5); margin-bottom: 3rem; font-size: 1rem; }
+
+    .header {
+      text-align: center;
+      margin-bottom: 4rem;
+    }
+
+    .header h1 {
+      font-size: 2.6rem;
+      font-weight: 400;
+      letter-spacing: 0.5rem;
+      color: #4a4035;
+      margin-bottom: 0.8rem;
+    }
+
+    .header .line {
+      width: 60px;
+      height: 1px;
+      background: #8a7d6b;
+      margin: 0 auto 1rem;
+    }
+
+    .header .subtitle {
+      font-size: 0.95rem;
+      color: #7a7060;
+      letter-spacing: 0.3rem;
+    }
+
+    /* 时间显示 */
+    .datetime {
+      text-align: center;
+      margin-bottom: 3rem;
+      color: #6a6050;
+    }
+    .datetime .date { font-size: 1.1rem; letter-spacing: 0.2rem; }
+    .datetime .time { font-size: 2rem; font-weight: 300; margin-top: 0.3rem; letter-spacing: 0.15rem; }
+
+    /* 应用卡片 */
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 24px;
-      max-width: 800px;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 240px));
+      gap: 28px;
+      justify-content: center;
+      max-width: 900px;
       width: 90%;
     }
+
     .card {
-      background: rgba(255,255,255,0.08);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 16px;
-      padding: 32px 24px;
+      background: rgba(255, 252, 245, 0.65);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(160, 145, 120, 0.25);
+      border-radius: 12px;
+      padding: 36px 24px 28px;
       text-align: center;
       text-decoration: none;
-      color: #fff;
-      transition: all 0.3s ease;
+      color: #4a4035;
+      transition: all 0.4s ease;
       cursor: pointer;
+      position: relative;
+      overflow: hidden;
     }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, #8a7d6b, transparent);
+      opacity: 0;
+      transition: opacity 0.4s;
+    }
+
     .card:hover {
-      background: rgba(255,255,255,0.15);
-      transform: translateY(-4px);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+      background: rgba(255, 252, 245, 0.85);
+      transform: translateY(-6px);
+      box-shadow: 0 16px 48px rgba(80, 60, 30, 0.12);
     }
-    .card .icon { font-size: 2.8rem; margin-bottom: 16px; }
-    .card .name { font-size: 1.15rem; font-weight: 500; margin-bottom: 8px; }
-    .card .desc { font-size: 0.85rem; color: rgba(255,255,255,0.5); line-height: 1.5; }
-    .footer {
-      margin-top: 3rem;
-      color: rgba(255,255,255,0.25);
+
+    .card:hover::before { opacity: 1; }
+
+    .card .icon {
+      font-size: 2.2rem;
+      margin-bottom: 14px;
+      display: block;
+    }
+
+    .card .name {
+      font-size: 1.1rem;
+      font-weight: 500;
+      margin-bottom: 8px;
+      letter-spacing: 0.15rem;
+    }
+
+    .card .desc {
       font-size: 0.8rem;
+      color: #8a7d6b;
+      line-height: 1.6;
+      letter-spacing: 0.05rem;
+    }
+
+    .card.coming-soon { opacity: 0.55; }
+    .card.coming-soon:hover { transform: none; box-shadow: none; cursor: default; }
+
+    /* 底部诗句 */
+    .footer {
+      position: fixed;
+      bottom: 2rem;
+      left: 0;
+      right: 0;
+      text-align: center;
+      z-index: 10;
+      color: #8a7d6b;
+      font-size: 0.85rem;
+      letter-spacing: 0.3rem;
+      font-style: italic;
+    }
+
+    @media (max-width: 600px) {
+      .header h1 { font-size: 1.8rem; letter-spacing: 0.3rem; }
+      .grid { grid-template-columns: 1fr; padding: 0 20px; }
+      .content { padding-top: 8vh; }
     }
   </style>
 </head>
 <body>
-  <h1>个人工作台</h1>
-  <p class="subtitle">选择要进入的应用</p>
+
+<div class="bg"></div>
+
+<!-- 山水SVG -->
+<svg class="mountains" viewBox="0 0 1440 600" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 远山 -->
+  <path d="M0,300 Q180,120 360,280 Q540,100 720,260 Q900,80 1080,240 Q1260,120 1440,300 L1440,600 L0,600 Z" fill="rgba(120,130,110,0.25)" />
+  <!-- 中山 -->
+  <path d="M0,380 Q120,220 300,350 Q420,180 600,320 Q780,160 960,300 Q1140,200 1320,340 Q1380,310 1440,380 L1440,600 L0,600 Z" fill="rgba(100,115,95,0.35)" />
+  <!-- 近山 -->
+  <path d="M0,440 Q200,300 400,420 Q500,340 700,400 Q850,300 1000,380 Q1150,320 1300,410 Q1370,380 1440,440 L1440,600 L0,600 Z" fill="rgba(80,95,75,0.4)" />
+  <!-- 水面 -->
+  <path d="M0,500 Q360,480 720,500 Q1080,480 1440,500 L1440,600 L0,600 Z" fill="rgba(140,160,150,0.3)" />
+  <path d="M0,530 Q360,520 720,535 Q1080,520 1440,530 L1440,600 L0,600 Z" fill="rgba(130,150,140,0.2)" />
+</svg>
+
+<!-- 雾气 -->
+<svg class="mist mist-1" viewBox="0 0 2880 120" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="400" cy="60" rx="500" ry="40" fill="rgba(220,215,200,0.5)" />
+  <ellipse cx="1200" cy="50" rx="600" ry="35" fill="rgba(220,215,200,0.4)" />
+  <ellipse cx="2000" cy="65" rx="450" ry="38" fill="rgba(220,215,200,0.45)" />
+  <ellipse cx="2800" cy="55" rx="500" ry="42" fill="rgba(220,215,200,0.4)" />
+</svg>
+<svg class="mist mist-2" viewBox="0 0 2880 120" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="300" cy="55" rx="450" ry="35" fill="rgba(210,205,190,0.4)" />
+  <ellipse cx="1000" cy="60" rx="550" ry="30" fill="rgba(210,205,190,0.35)" />
+  <ellipse cx="1800" cy="50" rx="400" ry="38" fill="rgba(210,205,190,0.4)" />
+  <ellipse cx="2600" cy="58" rx="480" ry="32" fill="rgba(210,205,190,0.35)" />
+</svg>
+
+<div class="content">
+  <div class="header">
+    <h1>逍遥栖</h1>
+    <div class="line"></div>
+    <div class="subtitle">心之所向 素履以往</div>
+  </div>
+
+  <div class="datetime">
+    <div class="date" id="date"></div>
+    <div class="time" id="time"></div>
+  </div>
+
   <div class="grid">
     <a class="card" href="/trading/">
-      <div class="icon">📊</div>
-      <div class="name">交易记录系统</div>
-      <div class="desc">多品种交易记录、可视化统计与复盘分析</div>
+      <span class="icon">📊</span>
+      <div class="name">交易记录</div>
+      <div class="desc">多品种交易记录<br>可视化统计与复盘分析</div>
     </a>
-    <a class="card" href="#" onclick="alert('敬请期待'); return false;">
-      <div class="icon">🔧</div>
-      <div class="name">更多应用</div>
-      <div class="desc">后续扩展的其他工具与服务</div>
+    <a class="card coming-soon" href="javascript:void(0)">
+      <span class="icon">📈</span>
+      <div class="name">行情监控</div>
+      <div class="desc">实时行情数据<br>敬请期待</div>
+    </a>
+    <a class="card coming-soon" href="javascript:void(0)">
+      <span class="icon">📝</span>
+      <div class="name">知识笔记</div>
+      <div class="desc">交易认知体系<br>敬请期待</div>
     </a>
   </div>
-  <div class="footer">Powered by Ubuntu + Nginx</div>
+</div>
+
+<div class="footer">行到水穷处 坐看云起时</div>
+
+<script>
+  function updateTime() {
+    const now = new Date();
+    const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const w = weekdays[now.getDay()];
+    document.getElementById('date').textContent = `${y} 年 ${m} 月 ${d} 日　星期${w}`;
+    const h = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const s = String(now.getSeconds()).padStart(2, '0');
+    document.getElementById('time').textContent = `${h}:${min}:${s}`;
+  }
+  updateTime();
+  setInterval(updateTime, 1000);
+</script>
+
 </body>
 </html>

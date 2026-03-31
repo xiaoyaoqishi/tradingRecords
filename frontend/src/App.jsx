@@ -5,6 +5,7 @@ import {
   OrderedListOutlined,
   FormOutlined,
   FileTextOutlined,
+  HomeOutlined,
 } from '@ant-design/icons';
 import Dashboard from './pages/Dashboard';
 import TradeList from './pages/TradeList';
@@ -17,6 +18,7 @@ function AppLayout() {
   const location = useLocation();
 
   const menuItems = [
+    { key: 'home', icon: <HomeOutlined />, label: <a href="/">返回首页</a> },
     { key: '/', icon: <DashboardOutlined />, label: <Link to="/">仪表盘</Link> },
     { key: '/trades', icon: <OrderedListOutlined />, label: <Link to="/trades">交易记录</Link> },
     { key: '/trades/new', icon: <FormOutlined />, label: <Link to="/trades/new">新建交易</Link> },
