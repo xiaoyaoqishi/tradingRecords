@@ -1,11 +1,16 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from pydantic import BaseModel
 import json
+import os
+import uuid
+import shutil
+
+DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
 
 from database import engine, get_db, Base, SessionLocal
 from models import Trade, Review, Notebook, Note
@@ -51,6 +56,8 @@ AUTH_WHITELIST = {"/api/auth/login", "/api/auth/check", "/api/auth/setup"}
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        if DEV_MODE:
+            return await call_next(request)
         if request.url.path.startswith("/api/") and request.url.path not in AUTH_WHITELIST:
             token = request.cookies.get(AUTH_COOKIE)
             if not token or not verify_token(token):
@@ -100,6 +107,35 @@ def auth_login(body: LoginBody, response: Response):
 def auth_logout(response: Response):
     response.delete_cookie(AUTH_COOKIE, path="/")
     return {"ok": True}
+
+
+# ── Upload ──
+
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"}
+
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXT:
+        raise HTTPException(400, f"不支持的文件格式: {ext}")
+    filename = f"{uuid.uuid4().hex}{ext}"
+    path = os.path.join(UPLOAD_DIR, filename)
+    with open(path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return {"url": f"/api/uploads/{filename}"}
+
+
+@app.get("/api/uploads/{filename}")
+def get_upload(filename: str):
+    safe = os.path.basename(filename)
+    path = os.path.join(UPLOAD_DIR, safe)
+    if not os.path.exists(path):
+        raise HTTPException(404, "File not found")
+    return FileResponse(path)
 
 
 # ── Trade ──
@@ -416,6 +452,75 @@ def list_notes(
         .limit(size)
         .all()
     )
+
+
+@app.get("/api/notes/stats")
+def note_stats(db: Session = Depends(get_db)):
+    from sqlalchemy import func as sqlfunc
+    diary_count = db.query(Note).filter(Note.note_type == "diary").count()
+    doc_count = db.query(Note).filter(Note.note_type == "doc").count()
+    diary_words = db.query(sqlfunc.coalesce(sqlfunc.sum(Note.word_count), 0)).filter(Note.note_type == "diary").scalar()
+    doc_words = db.query(sqlfunc.coalesce(sqlfunc.sum(Note.word_count), 0)).filter(Note.note_type == "doc").scalar()
+    recent_docs = (
+        db.query(Note)
+        .filter(Note.note_type == "doc")
+        .order_by(Note.updated_at.desc())
+        .limit(8)
+        .all()
+    )
+    return {
+        "diary_count": diary_count,
+        "doc_count": doc_count,
+        "diary_word_count": diary_words,
+        "doc_word_count": doc_words,
+        "recent_docs": [
+            {"id": n.id, "title": n.title or "无标题", "updated_at": str(n.updated_at)}
+            for n in recent_docs
+        ],
+    }
+
+
+@app.get("/api/notes/history-today")
+def history_today(db: Session = Depends(get_db)):
+    from datetime import date as dt_date
+    from sqlalchemy import func as sqlfunc
+    today = dt_date.today()
+    md = today.strftime("%m-%d")
+    notes = (
+        db.query(Note)
+        .filter(
+            Note.note_type == "diary",
+            Note.note_date.isnot(None),
+            sqlfunc.strftime("%m-%d", Note.note_date) == md,
+            sqlfunc.strftime("%Y", Note.note_date) != str(today.year),
+        )
+        .order_by(Note.note_date.desc())
+        .all()
+    )
+    return [
+        {"id": n.id, "title": n.title, "note_date": str(n.note_date)}
+        for n in notes
+    ]
+
+
+@app.get("/api/notes/diary-tree")
+def diary_tree(db: Session = Depends(get_db)):
+    from sqlalchemy import func as sqlfunc
+    notes = (
+        db.query(Note.id, Note.title, Note.note_date)
+        .filter(Note.note_type == "diary", Note.note_date.isnot(None))
+        .order_by(Note.note_date.desc())
+        .all()
+    )
+    tree = {}
+    for n in notes:
+        y = str(n.note_date.year) + "年"
+        m = str(n.note_date.month) + "月"
+        d = str(n.note_date.day).zfill(2) + "日"
+        tree.setdefault(y, {}).setdefault(m, []).append(
+            {"id": n.id, "title": n.title, "date": str(n.note_date), "day": d}
+        )
+    return tree
 
 
 @app.get("/api/notes/calendar")
