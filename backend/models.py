@@ -153,3 +153,25 @@ class Note(Base):
     word_count = Column(Integer, default=0)
 
     notebook = relationship("Notebook", back_populates="notes")
+
+
+class NewsIssue(Base):
+    __tablename__ = "news_issues"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    title = Column(String(255), nullable=False)
+    issue_date = Column(Date, nullable=True)
+    source_repo = Column(String(255), nullable=False)
+    source_path = Column(String(500), nullable=False, unique=True)
+    source_sha = Column(String(80), nullable=True)
+    source_url = Column(String(500), nullable=True)
+    local_epub_path = Column(String(500), nullable=True)
+
+    content_en = Column(Text, default="")
+    content_zh = Column(Text, default="")
+    status = Column(String(30), default="downloaded")
+    translated_at = Column(DateTime, nullable=True)
+

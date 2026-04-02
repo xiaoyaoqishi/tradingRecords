@@ -4,3 +4,6 @@ sqlalchemy
 pydantic
 python-multipart
 psutil
+httpx
+ebooklib
+beautifulsoup4

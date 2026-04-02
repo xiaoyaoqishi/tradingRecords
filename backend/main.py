@@ -11,20 +11,31 @@ import uuid
 import shutil
 import threading
 import time as _time
-from datetime import datetime
+import re
+import html
+import hashlib
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from datetime import datetime, date
+from email.utils import parsedate_to_datetime
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import httpx
 import psutil
+from ebooklib import epub, ITEM_DOCUMENT
+from bs4 import BeautifulSoup
 
 DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
 
 from database import engine, get_db, Base, SessionLocal
-from models import Trade, Review, Notebook, Note
+from models import Trade, Review, Notebook, Note, NewsIssue
 from schemas import (
     TradeCreate, TradeUpdate, TradeResponse,
     ReviewCreate, ReviewUpdate, ReviewResponse,
     NotebookCreate, NotebookUpdate, NotebookResponse,
     NoteCreate, NoteUpdate, NoteResponse,
+    NewsIssueResponse, NewsIssueDetailResponse,
 )
 from auth import load_credentials, save_credentials, check_login, create_token, verify_token
 
@@ -590,6 +601,602 @@ def delete_note(note_id: int, db: Session = Depends(get_db)):
     db.delete(n)
     db.commit()
     return {"ok": True}
+
+
+
+# ── News ──
+
+NEWS_REPO = os.environ.get("ECONOMIST_REPO", "Yv6GtreV/TheEconomistDownload")
+NEWS_BRANCH = os.environ.get("ECONOMIST_BRANCH", "main")
+NEWS_DATA_DIR = Path(os.path.dirname(os.path.abspath(__file__))) / "data" / "news_epub"
+NEWS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+TRANSLATE_PROVIDER = os.environ.get("TRANSLATE_PROVIDER", "auto")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_MODELS = [m.strip() for m in os.environ.get("DEEPSEEK_MODELS", f"{DEEPSEEK_MODEL},deepseek-v3").split(",") if m.strip()]
+
+_news_progress_lock = threading.Lock()
+_news_translate_progress: dict[int, dict] = {}
+
+_today_news_lock = threading.Lock()
+_today_news_cache = {"updated_at": None, "payload": None}
+TODAY_NEWS_CACHE_TTL = int(os.environ.get("TODAY_NEWS_CACHE_TTL", "900"))
+
+TODAY_NEWS_FEEDS = {
+    "经济": [
+        ("Reuters Business", "https://feeds.reuters.com/reuters/businessNews"),
+        ("FT World", "https://www.ft.com/world?format=rss"),
+    ],
+    "时政": [
+        ("Reuters World", "https://feeds.reuters.com/Reuters/worldNews"),
+        ("BBC World", "http://feeds.bbci.co.uk/news/world/rss.xml"),
+    ],
+    "AI": [
+        ("TechCrunch AI", "https://techcrunch.com/category/artificial-intelligence/feed/"),
+        ("VentureBeat AI", "https://venturebeat.com/category/ai/feed/"),
+    ],
+    "科技": [
+        ("Reuters Technology", "https://feeds.reuters.com/reuters/technologyNews"),
+        ("The Verge", "https://www.theverge.com/rss/index.xml"),
+    ],
+}
+
+
+def _extract_issue_date(name: str) -> Optional[date]:
+    candidates = [
+        r"(20\d{2})[-_\.](\d{1,2})[-_\.](\d{1,2})",
+        r"(20\d{2})(\d{2})(\d{2})",
+    ]
+    for pattern in candidates:
+        m = re.search(pattern, name)
+        if not m:
+            continue
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        try:
+            return date(y, mo, d)
+        except Exception:
+            return None
+    return None
+
+
+def _parse_epub_text(epub_path: Path) -> str:
+    book = epub.read_epub(str(epub_path))
+    sections = []
+    for item in book.get_items_of_type(ITEM_DOCUMENT):
+        soup = BeautifulSoup(item.get_content(), "html.parser")
+        for bad in soup(["script", "style", "nav"]):
+            bad.decompose()
+        text = soup.get_text("\n", strip=True)
+        text = html.unescape(text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        if len(text) > 60:
+            sections.append(text)
+    return _clean_extracted_text("\n\n".join(sections))
+
+
+def _clean_extracted_text(text: str) -> str:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    filtered = []
+    noise = (
+        "the economist", "contents", "leader", "letters", "briefing",
+        "subscribe", "print edition", "digital edition", "downloaded from",
+    )
+
+    for ln in lines:
+        low = ln.lower()
+        if len(ln) < 2:
+            continue
+        if sum(ch.isdigit() for ch in ln) >= max(5, len(ln) // 2):
+            continue
+        if any(k in low for k in noise) and len(ln) < 60:
+            continue
+        filtered.append(ln)
+
+    dedup = []
+    seen = set()
+    for ln in filtered:
+        key = ln.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(ln)
+
+    return "\n\n".join(dedup)
+
+
+def _split_text_chunks(text: str, max_len: int = 2800) -> List[str]:
+    paras = [p.strip() for p in text.split("\n\n") if p.strip()]
+    chunks = []
+    buf = ""
+    for p in paras:
+        if len(buf) + len(p) + 2 <= max_len:
+            buf = f"{buf}\n\n{p}".strip()
+        else:
+            if buf:
+                chunks.append(buf)
+            if len(p) <= max_len:
+                buf = p
+            else:
+                for i in range(0, len(p), max_len):
+                    chunks.append(p[i:i + max_len])
+                buf = ""
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
+def _translate_with_openai_compatible(api_key: str, base_url: str, model: str, text: str) -> str:
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "你是专业财经翻译。将英文翻译为准确、流畅、简洁的中文，保留原段落结构。"
+                    "术语要求：yield curve=收益率曲线，basis points=个基点，"
+                    "fiscal deficit=财政赤字，current-account deficit=经常账户赤字，"
+                    "quantitative easing=量化宽松。"
+                    "机构、人名、地名首次出现可保留英文括号。不要添加解释和总结。"
+                ),
+            },
+            {"role": "user", "content": text},
+        ],
+        "temperature": 0.1,
+    }
+    with httpx.Client(timeout=120) as client:
+        resp = client.post(
+            f"{base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+        )
+        if resp.status_code >= 400:
+            detail = ""
+            try:
+                detail = resp.json().get("error", {}).get("message", "")
+            except Exception:
+                detail = resp.text[:500]
+            raise HTTPException(resp.status_code, f"模型请求失败({resp.status_code}): {detail or resp.text[:300]}")
+        data = resp.json()
+    return data["choices"][0]["message"]["content"].strip()
+
+
+def _translate_with_deepseek_fallback(chunk: str) -> str:
+    last_err = None
+    base_candidates = [DEEPSEEK_BASE_URL, "https://api.deepseek.com", "https://api.deepseek.com/v1"]
+    for base in base_candidates:
+        for model in DEEPSEEK_MODELS:
+            try:
+                return _translate_with_openai_compatible(
+                    DEEPSEEK_API_KEY,
+                    base,
+                    model,
+                    chunk,
+                )
+            except HTTPException as e:
+                last_err = e
+                continue
+            except Exception as e:
+                last_err = e
+                continue
+    if isinstance(last_err, HTTPException):
+        raise last_err
+    raise HTTPException(500, f"DeepSeek 调用失败: {last_err}")
+
+
+def _chunk_cache_dir() -> Path:
+    d = NEWS_DATA_DIR / "translation_cache"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _chunk_cache_key(chunk: str) -> str:
+    raw = f"{TRANSLATE_PROVIDER}|{DEEPSEEK_MODEL}|{OPENAI_MODEL}|{chunk}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _translate_chunk_cached(chunk: str) -> str:
+    cache_file = _chunk_cache_dir() / f"{_chunk_cache_key(chunk)}.txt"
+    if cache_file.exists():
+        return cache_file.read_text(encoding="utf-8")
+
+    provider = TRANSLATE_PROVIDER.lower()
+    last_err = None
+
+    for _ in range(3):
+        try:
+            if provider in ("auto", "deepseek") and DEEPSEEK_API_KEY:
+                text = _translate_with_openai_compatible(
+                    DEEPSEEK_API_KEY,
+                    "https://api.deepseek.com",
+                    DEEPSEEK_MODEL,
+                    chunk,
+                )
+                cache_file.write_text(text, encoding="utf-8")
+                return text
+
+            if provider in ("auto", "openai") and OPENAI_API_KEY:
+                text = _translate_with_openai_compatible(
+                    OPENAI_API_KEY,
+                    OPENAI_BASE_URL,
+                    OPENAI_MODEL,
+                    chunk,
+                )
+                cache_file.write_text(text, encoding="utf-8")
+                return text
+
+            raise HTTPException(400, "未配置翻译 API Key，请设置 DEEPSEEK_API_KEY 或 OPENAI_API_KEY")
+        except Exception as e:
+            last_err = e
+
+    raise HTTPException(500, f"翻译分块失败: {last_err}")
+
+
+def _translate_text(text: str, progress_cb=None) -> str:
+    chunks = _split_text_chunks(text)
+    if not chunks:
+        if progress_cb:
+            progress_cb(0, 0)
+        return ""
+
+    workers = int(os.environ.get("TRANSLATE_MAX_WORKERS", "4"))
+    workers = max(1, min(8, workers))
+    results = [""] * len(chunks)
+    done = 0
+    total = len(chunks)
+
+    if progress_cb:
+        progress_cb(done, total)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        fut_map = {pool.submit(_translate_chunk_cached, chunk): idx for idx, chunk in enumerate(chunks)}
+        for fut in as_completed(fut_map):
+            idx = fut_map[fut]
+            try:
+                results[idx] = fut.result()
+            except HTTPException as e:
+                detail = str(e.detail)
+                if "Content Exists Risk" in detail:
+                    results[idx] = f"[本段触发模型风控，保留原文]\n\n{chunks[idx]}"
+                else:
+                    raise
+            done += 1
+            if progress_cb:
+                progress_cb(done, total)
+
+    return "\n\n".join(results)
+
+
+def _extract_latest_entry_from_readme(readme_text: str) -> dict:
+    pattern = re.compile(
+        r"^##\s+(.+?)\s*$\n(?:-|\*)\s*\[EBOOK\]\((https?://[^)]+)\)",
+        re.MULTILINE,
+    )
+    matches = pattern.findall(readme_text)
+    if not matches:
+        raise HTTPException(404, "来源仓库 README 中未找到 EBOOK 链接")
+
+    candidates = []
+    for title, url in matches:
+        issue_dt = _extract_issue_date(title)
+        if not issue_dt:
+            continue
+        candidates.append((issue_dt, title.strip(), url.strip()))
+
+    if not candidates:
+        raise HTTPException(404, "README 中未找到可识别日期的 EBOOK 条目")
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    issue_dt, issue_title, ebook_url = candidates[0]
+    return {
+        "issue_date": issue_dt,
+        "title": issue_title,
+        "ebook_url": ebook_url,
+    }
+
+
+def _google_drive_direct_download(url: str) -> str:
+    m = re.search(r"/d/([^/]+)", url)
+    if not m:
+        return url
+    file_id = m.group(1)
+    return f"https://drive.google.com/uc?export=download&id={file_id}"
+
+
+def _download_latest_issue() -> dict:
+    if "/" not in NEWS_REPO:
+        raise HTTPException(400, "ECONOMIST_REPO 格式错误，应为 owner/repo")
+
+    owner, repo = NEWS_REPO.split("/", 1)
+    readme_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{NEWS_BRANCH}/README.md"
+
+    with httpx.Client(timeout=60, follow_redirects=True) as client:
+        readme_resp = client.get(readme_url)
+        readme_resp.raise_for_status()
+        latest = _extract_latest_entry_from_readme(readme_resp.text)
+
+        filename = f"{latest['issue_date']}.epub"
+        local_path = NEWS_DATA_DIR / filename
+        download_url = _google_drive_direct_download(latest["ebook_url"])
+
+        dl_resp = client.get(download_url)
+        dl_resp.raise_for_status()
+        local_path.write_bytes(dl_resp.content)
+
+    parsed_text = _parse_epub_text(local_path)
+
+    return {
+        "title": latest["title"],
+        "issue_date": latest["issue_date"],
+        "source_repo": NEWS_REPO,
+        "source_path": latest["title"],
+        "source_sha": None,
+        "source_url": latest["ebook_url"],
+        "local_epub_path": str(local_path),
+        "content_en": parsed_text,
+    }
+
+
+@app.post("/api/news/sync", response_model=NewsIssueResponse)
+def sync_latest_news(db: Session = Depends(get_db)):
+    latest = _download_latest_issue()
+
+    issue = db.query(NewsIssue).filter(NewsIssue.source_path == latest["source_path"]).first()
+    if not issue:
+        issue = NewsIssue(**latest, status="downloaded")
+        db.add(issue)
+    else:
+        for k, v in latest.items():
+            setattr(issue, k, v)
+        issue.status = "downloaded"
+
+    db.commit()
+    db.refresh(issue)
+    return issue
+
+
+@app.get("/api/news/issues", response_model=List[NewsIssueResponse])
+def list_news_issues(db: Session = Depends(get_db)):
+    return db.query(NewsIssue).order_by(NewsIssue.issue_date.desc(), NewsIssue.updated_at.desc()).all()
+
+
+@app.get("/api/news/issues/{issue_id}", response_model=NewsIssueDetailResponse)
+def get_news_issue(issue_id: int, db: Session = Depends(get_db)):
+    issue = db.query(NewsIssue).filter(NewsIssue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(404, "News issue not found")
+    return issue
+
+
+@app.delete("/api/news/issues/{issue_id}")
+def delete_news_issue(issue_id: int, db: Session = Depends(get_db)):
+    issue = db.query(NewsIssue).filter(NewsIssue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(404, "News issue not found")
+
+    local_path = (issue.local_epub_path or "").strip()
+    if local_path:
+        try:
+            p = Path(local_path)
+            if p.exists() and p.is_file():
+                p.unlink()
+        except Exception:
+            pass
+
+    db.delete(issue)
+    db.commit()
+
+    with _news_progress_lock:
+        _news_translate_progress.pop(issue_id, None)
+
+    return {"ok": True}
+
+
+@app.post("/api/news/issues/{issue_id}/translate", response_model=NewsIssueDetailResponse)
+def translate_news_issue(issue_id: int, db: Session = Depends(get_db)):
+    issue = db.query(NewsIssue).filter(NewsIssue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(404, "News issue not found")
+    if not issue.content_en:
+        raise HTTPException(400, "当前期刊没有可翻译内容")
+
+    issue.status = "translating"
+    db.commit()
+
+    def _progress(done: int, total: int):
+        pct = 100 if total == 0 else round(done * 100 / total, 2)
+        with _news_progress_lock:
+            _news_translate_progress[issue_id] = {
+                "issue_id": issue_id,
+                "status": "translating",
+                "done": done,
+                "total": total,
+                "percent": pct,
+                "message": f"正在翻译 {done}/{total}",
+                "updated_at": datetime.now().isoformat(),
+            }
+
+    try:
+        _progress(0, 0)
+        translated = _translate_text(issue.content_en, progress_cb=_progress)
+        issue.content_zh = translated
+        issue.translated_at = datetime.now()
+        issue.status = "translated"
+        db.commit()
+        db.refresh(issue)
+        with _news_progress_lock:
+            total = _news_translate_progress.get(issue_id, {}).get("total", 0)
+            _news_translate_progress[issue_id] = {
+                "issue_id": issue_id,
+                "status": "translated",
+                "done": total,
+                "total": total,
+                "percent": 100,
+                "message": "翻译完成",
+                "updated_at": datetime.now().isoformat(),
+            }
+        return issue
+    except HTTPException as e:
+        issue.status = "downloaded"
+        db.commit()
+        with _news_progress_lock:
+            prev = _news_translate_progress.get(issue_id, {})
+            _news_translate_progress[issue_id] = {
+                "issue_id": issue_id,
+                "status": "failed",
+                "done": prev.get("done", 0),
+                "total": prev.get("total", 0),
+                "percent": prev.get("percent", 0),
+                "message": str(e.detail),
+                "updated_at": datetime.now().isoformat(),
+            }
+        raise
+    except Exception as e:
+        issue.status = "downloaded"
+        db.commit()
+        with _news_progress_lock:
+            prev = _news_translate_progress.get(issue_id, {})
+            _news_translate_progress[issue_id] = {
+                "issue_id": issue_id,
+                "status": "failed",
+                "done": prev.get("done", 0),
+                "total": prev.get("total", 0),
+                "percent": prev.get("percent", 0),
+                "message": str(e),
+                "updated_at": datetime.now().isoformat(),
+            }
+        raise HTTPException(500, f"翻译失败: {e}")
+
+
+@app.get("/api/news/issues/{issue_id}/progress")
+def get_news_translate_progress(issue_id: int):
+    with _news_progress_lock:
+        p = _news_translate_progress.get(issue_id)
+    if p:
+        return p
+    return {
+        "issue_id": issue_id,
+        "status": "idle",
+        "done": 0,
+        "total": 0,
+        "percent": 0,
+        "message": "未开始",
+        "updated_at": datetime.now().isoformat(),
+    }
+
+
+def _parse_rss_feed(xml_text: str, fallback_source: str, limit: int = 10) -> List[dict]:
+    out = []
+    try:
+        root = ET.fromstring(xml_text)
+    except Exception:
+        return out
+
+    channel = root.find("channel")
+    if channel is None:
+        return out
+
+    channel_title = channel.findtext("title") or fallback_source
+
+    for item in channel.findall("item")[:limit]:
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        if not title or not link:
+            continue
+
+        source = fallback_source
+        src_node = item.find("source")
+        if src_node is not None and (src_node.text or "").strip():
+            source = src_node.text.strip()
+        else:
+            source = channel_title
+
+        summary_raw = (item.findtext("description") or "").strip()
+        summary = BeautifulSoup(summary_raw, "html.parser").get_text(" ", strip=True)[:240]
+
+        published_at = None
+        pub_raw = (item.findtext("pubDate") or "").strip()
+        if pub_raw:
+            try:
+                published_at = parsedate_to_datetime(pub_raw).isoformat()
+            except Exception:
+                published_at = pub_raw
+
+        out.append({
+            "title": title,
+            "url": link,
+            "source": source,
+            "published_at": published_at,
+            "summary": summary,
+        })
+
+    return out
+
+
+def _fetch_today_feed(source_name: str, feed_url: str, limit: int) -> List[dict]:
+    try:
+        with httpx.Client(timeout=20, follow_redirects=True) as client:
+            resp = client.get(feed_url)
+            resp.raise_for_status()
+        return _parse_rss_feed(resp.text, source_name, limit=limit)
+    except Exception:
+        return []
+
+
+def _build_today_news(limit_per_category: int = 8) -> dict:
+    categories = []
+
+    for cat, feeds in TODAY_NEWS_FEEDS.items():
+        merged = []
+        for source_name, feed_url in feeds:
+            merged.extend(_fetch_today_feed(source_name, feed_url, limit_per_category))
+
+        dedup = []
+        seen = set()
+        for item in merged:
+            key = item.get("url") or item.get("title")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            dedup.append(item)
+
+        dedup.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+
+        categories.append({
+            "name": cat,
+            "items": dedup[:limit_per_category],
+        })
+
+    return {
+        "updated_at": datetime.now().isoformat(),
+        "categories": categories,
+    }
+
+
+@app.get("/api/news/today")
+def get_today_news(
+    force_refresh: bool = Query(False),
+    limit: int = Query(8, ge=3, le=20),
+):
+    now_ts = _time.time()
+
+    with _today_news_lock:
+        cached = _today_news_cache.get("payload")
+        updated_at = _today_news_cache.get("updated_at")
+        if not force_refresh and cached and updated_at and (now_ts - updated_at) < TODAY_NEWS_CACHE_TTL:
+            return cached
+
+    payload = _build_today_news(limit_per_category=limit)
+
+    with _today_news_lock:
+        _today_news_cache["updated_at"] = now_ts
+        _today_news_cache["payload"] = payload
+
+    return payload
 
 
 # ══════════════════════════════════════════

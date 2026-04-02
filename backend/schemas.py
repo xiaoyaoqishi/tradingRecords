@@ -261,3 +261,29 @@ class NoteResponse(NoteCreate):
 
     class Config:
         from_attributes = True
+
+
+# ── News ──
+
+
+class NewsIssueResponse(BaseModel):
+    id: int
+    title: str
+    issue_date: Optional[date] = None
+    source_repo: str
+    source_path: str
+    source_sha: Optional[str] = None
+    source_url: Optional[str] = None
+    status: str
+    translated_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class NewsIssueDetailResponse(NewsIssueResponse):
+    content_en: Optional[str] = ""
+    content_zh: Optional[str] = ""
+

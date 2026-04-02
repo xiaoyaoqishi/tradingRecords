@@ -1,6 +1,6 @@
 # 骁遥骑士 · 个人工作台
 
-部署于阿里云 ECS 的个人工作平台，包含交易记录复盘系统、知识笔记和服务器监控模块。
+部署于阿里云 ECS 的个人工作平台，包含交易记录复盘系统、知识笔记、新闻实事阅读与服务器监控模块。
 
 ---
 
@@ -11,6 +11,7 @@
                         ├── /             → 首页门户 (静态 HTML，山水风格)
                         ├── /trading/*    → 交易前端 (React SPA)
                         ├── /notes/*      → 笔记前端 (React SPA，eDiary 风格)
+                        ├── /news/*       → 新闻前端 (React SPA，Economist 阅读)
                         ├── /monitor/*    → 监控前端 (React SPA，实时仪表盘)
                         ├── /api/uploads/ → 图片文件 (静态资源)
                         └── /api/*        → FastAPI 后端 (127.0.0.1:8000)
@@ -23,6 +24,7 @@
 |------|--------|------|
 | 前端 - 交易 | React 19 + Vite 8 + Ant Design 6 + Recharts 3 | 交易记录与复盘分析 |
 | 前端 - 笔记 | React 19 + Vite 8 + Ant Design 6 + TipTap + lunar-javascript | eDiary 风格日记与文档管理 |
+| 前端 - 新闻 | React 19 + Vite 8 + Ant Design 6 | Economist 同步、翻译与阅读 |
 | 前端 - 监控 | React 18 + Vite 6 + Ant Design 5 + Recharts 2 | 服务器实时监控仪表盘 |
 | 后端 | Python + FastAPI + SQLAlchemy + psutil | RESTful API + 图片上传 + 系统监控采集 |
 | 数据库 | SQLite | 数据文件：`backend/data/trading.db` |
@@ -44,6 +46,23 @@
 - 基于 HMAC 签名 Cookie 会话认证，登录状态保持 7 天
 - 未登录时自动跳转登录页，支持 `?redirect=` 回跳
 - 本地开发模式（`DEV_MODE=1`）跳过认证
+
+### 新闻实事系统（/news/）
+
+左侧为子模块侧栏，右侧为信息区。
+
+**子模块 A：Economist**
+- 一键同步最新一期（自动从来源仓库 README 提取最新 EBOOK）
+- 自动下载 EPUB 并抽取正文文本
+- 下载与翻译结果按期存放在子模块数据目录（`backend/data/news_epub/`）
+- 分块并行翻译（DeepSeek/OpenAI 兼容接口）
+- 翻译过程进度条（done/total/percent）
+- 风控场景处理：出现 `Content Exists Risk` 时保留原文段落并继续后续分块
+
+**子模块 B：今日新闻**
+- 聚合四类：经济、时政、AI、科技
+- 仅抓取真实来源 RSS（如 Reuters、BBC、TechCrunch、The Verge 等）
+- 每条新闻必须包含来源与原文链接，禁止杜撰
 
 ### 交易记录系统（/trading/）
 
@@ -68,6 +87,7 @@
 **首页 Tab**：
 - 公历 + 农历日期显示
 - 自动定位获取当前天气（Open-Meteo API）+ 未来两天预报
+- 服务器环境获取不到定位时，默认使用 **深圳市龙华区**
 - 知识笔记统计概览（日记/文档数量、总字数）
 - 最近文档快速访问
 - 日历备忘（含天气）
@@ -156,6 +176,9 @@ program/
 │       ├── trading.db               # SQLite 数据库
 │       ├── auth.json                # 认证凭据（用户名 + 密码哈希）
 │       ├── .secret                  # 会话签名密钥
+│       ├── news_epub/               # 新闻期刊与翻译缓存
+│       │   ├── *.epub               # 下载的 Economist 期刊
+│       │   └── translation_cache/   # 分块翻译缓存
 │       └── uploads/                 # 上传的图片文件
 │
 ├── frontend/                        # 交易记录前端 (/trading/)
@@ -184,7 +207,15 @@ program/
 │           ├── MiniCalendar.jsx     # 自定义迷你日历组件（中文）
 │           ├── NoteEditor.jsx       # TipTap 富文本编辑器（字体/字号/颜色/表格/图片上传...）
 │           └── ResizableImage.jsx   # 可调大小图片扩展（TipTap NodeView）
-│
+││
+├── frontend-news/                   # 新闻实事前端 (/news/)
+│   ├── package.json                 # antd, axios, dayjs
+│   ├── vite.config.js               # base: '/news/', 代理 /api → localhost:8000
+│   └── src/
+│       ├── App.jsx                  # 左侧子模块侧栏 + 右侧信息区（Economist/今日新闻）
+│       ├── App.css                  # 页面样式
+│       └── api/index.js             # 新闻接口封装（sync/list/get/translate/progress/today）
+
 ├── frontend-monitor/                # 服务器监控前端 (/monitor/)
 │   ├── package.json                 # antd, recharts, axios
 │   ├── vite.config.js               # base: '/monitor/', 代理 /api → localhost:8000
@@ -217,6 +248,7 @@ pip3 install -r requirements.txt
 # 2. 安装前端依赖（首次或依赖变更时）
 cd program/frontend && npm install
 cd program/frontend-notes && npm install
+cd program/frontend-news && npm install
 cd program/frontend-monitor && npm install
 ```
 
@@ -235,7 +267,11 @@ npm run dev
 cd program/frontend-notes
 npm run dev
 
-# 终端 4 — 监控前端 → http://localhost:5175/monitor/
+# 终端 4 — 新闻前端 → http://localhost:5175/news/
+cd program/frontend-news
+npm run dev
+
+# 终端 5 — 监控前端 → http://localhost:5176/monitor/
 cd program/frontend-monitor
 npm run dev
 ```
@@ -256,7 +292,7 @@ cd program && git add -A && git commit -m "描述" && git push
 ssh -i ~/.ssh/xiaoyao.pem root@<服务器IP> "cd /opt/tradingRecords && bash deploy/update.sh"
 ```
 
-`update.sh` 自动完成：`git pull` → 安装依赖 → 构建三个前端 → 同步 Nginx/门户配置 → 重启服务。
+`update.sh` 自动完成：`git pull` → 安装依赖 → 构建四个前端 → 同步 Nginx/门户配置 → 重启服务。
 
 ### 首次部署额外步骤
 
@@ -334,6 +370,16 @@ curl -X POST http://127.0.0.1:8000/api/auth/setup \
 | GET | `/api/notes/diary-tree` | 日记日期树（年 > 月 > 日结构） |
 | GET | `/api/notes/history-today` | 历史上的今天（往年同日日记） |
 
+### 新闻实事
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/news/sync` | 同步并入库最新一期 |
+| GET | `/api/news/issues` | 期刊列表 |
+| GET | `/api/news/issues/{id}` | 期刊详情（含英文/中文内容） |
+| POST | `/api/news/issues/{id}/translate` | 翻译当前期 |
+| GET | `/api/news/issues/{id}/progress` | 翻译进度 |
+| GET | `/api/news/today` | 今日新闻聚合（经济/时政/AI/科技，含来源链接） |
 ### 服务器监控
 
 | 方法 | 路径 | 说明 |
