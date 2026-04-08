@@ -151,6 +151,8 @@ class Note(Base):
     tags = Column(Text)
     is_pinned = Column(Boolean, default=False)
     word_count = Column(Integer, default=0)
+    is_deleted = Column(Boolean, default=False)
+    deleted_at = Column(DateTime, nullable=True)
 
     notebook = relationship("Notebook", back_populates="notes")
 

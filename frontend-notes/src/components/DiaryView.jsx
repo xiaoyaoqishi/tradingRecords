@@ -170,7 +170,7 @@ export default function DiaryView({ initialNoteId, notebooks }) {
       if (activeNote?.id === id) setActiveNote(null);
       loadTree();
       loadCalendar(selectedDate);
-      message.success('已删除');
+      message.success('已移入回收站');
     } catch { message.error('删除失败'); }
   };
 

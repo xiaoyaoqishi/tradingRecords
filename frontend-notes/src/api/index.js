@@ -30,6 +30,9 @@ export const noteApi = {
   historyToday: () => api.get('/notes/history-today'),
   diaryTree: () => api.get('/notes/diary-tree'),
   diarySummaries: (params) => api.get('/notes/diary-summaries', { params }),
+  recycleList: (params) => api.get('/recycle/notes', { params }),
+  restore: (id) => api.post(`/recycle/notes/${id}/restore`),
+  purge: (id) => api.delete(`/recycle/notes/${id}/purge`),
 };
 
 export const todoApi = {

@@ -188,7 +188,7 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
       await noteApi.delete(id);
       if (activeNote?.id === id) setActiveNote(null);
       loadNotes();
-      message.success('已删除');
+      message.success('已移入回收站');
     } catch { message.error('删除失败'); }
   };
 

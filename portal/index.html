@@ -7,276 +7,301 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%234a4035'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='34' fill='white'%3E台%3C/text%3E%3C/svg%3E" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
     body {
-      font-family: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
+      font-family: 'Songti SC', 'STSong', 'Noto Serif SC', serif;
+      color: #2f2c28;
       min-height: 100vh;
       overflow: hidden;
-      color: #3a3a3a;
+      background: radial-gradient(120% 100% at 20% 0%, #ece7dd 0%, #d8d2c4 42%, #c7c0b1 100%);
     }
 
-    /* 山水背景层 */
-    .bg {
+    .ink-bg {
       position: fixed;
       inset: 0;
       z-index: 0;
-      background: linear-gradient(180deg, #e8dfd0 0%, #d4c8b0 30%, #c2b89e 50%, #b8c4b0 70%, #9ab09a 100%);
+      background:
+        radial-gradient(52% 40% at 8% 20%, rgba(64, 67, 63, 0.24), transparent 66%),
+        radial-gradient(36% 30% at 78% 12%, rgba(78, 74, 66, 0.21), transparent 70%),
+        radial-gradient(34% 25% at 68% 76%, rgba(60, 73, 74, 0.25), transparent 75%);
+      filter: blur(2px) grayscale(0.2);
     }
 
-    /* SVG 山水画 */
-    .mountains {
+    .mountain-wrap {
       position: fixed;
-      bottom: 0;
-      left: 0;
-      width: 100%;
-      height: 60vh;
+      inset: 0;
       z-index: 1;
+      opacity: 0.82;
     }
 
-    /* 雾气动画 */
     .mist {
       position: fixed;
-      width: 200%;
-      height: 120px;
+      width: 180%;
+      height: 160px;
+      left: -35%;
       z-index: 2;
-      opacity: 0.4;
-      animation: drift 30s linear infinite;
+      opacity: 0.35;
+      animation: drift 40s linear infinite;
     }
-    .mist-1 { bottom: 25vh; }
-    .mist-2 { bottom: 40vh; animation-duration: 45s; animation-direction: reverse; opacity: 0.25; }
+    .mist.top { top: 14vh; }
+    .mist.mid { top: 38vh; animation-duration: 56s; animation-direction: reverse; }
 
     @keyframes drift {
       from { transform: translateX(0); }
-      to { transform: translateX(-50%); }
+      to { transform: translateX(-45%); }
     }
 
-    /* 内容层 */
-    .content {
+    .shell {
       position: relative;
       z-index: 10;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
+      padding: 5vh 5vw 4vh;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .brand h1 {
+      font-size: clamp(30px, 4vw, 52px);
+      font-weight: 500;
+      letter-spacing: 0.4rem;
+      color: #3f3a34;
+    }
+
+    .brand .slogan {
+      margin-top: 8px;
+      font-size: 13px;
+      letter-spacing: 0.22rem;
+      color: #6a6258;
+    }
+
+    .clock {
+      text-align: right;
+      color: #4c463f;
+      margin-top: 6px;
+    }
+    .clock .date { font-size: 14px; letter-spacing: 0.12rem; }
+    .clock .time { font-size: clamp(24px, 3vw, 34px); font-weight: 300; margin-top: 3px; }
+
+    .poem {
+      margin-top: 2.6vh;
+      width: min(720px, 100%);
+      background: rgba(247, 243, 236, 0.55);
+      border: 1px solid rgba(119, 108, 92, 0.2);
+      border-radius: 14px;
+      backdrop-filter: blur(10px);
+      padding: 18px 20px;
+      box-shadow: 0 10px 34px rgba(78, 66, 48, 0.10);
+    }
+    .poem .title {
+      font-size: 13px;
+      color: #847762;
+      letter-spacing: 0.18rem;
+    }
+    .poem-head {
+      display: flex;
       align-items: center;
-      padding-top: 12vh;
+      justify-content: space-between;
+      margin-bottom: 8px;
     }
-
-    .header {
-      text-align: center;
-      margin-bottom: 4rem;
-    }
-
-    .header h1 {
-      font-size: 2.6rem;
-      font-weight: 400;
-      letter-spacing: 0.5rem;
-      color: #4a4035;
-      margin-bottom: 0.8rem;
-    }
-
-    .header .line {
-      width: 60px;
-      height: 1px;
-      background: #8a7d6b;
-      margin: 0 auto 1rem;
-    }
-
-    .header .subtitle {
-      font-size: 0.95rem;
-      color: #7a7060;
-      letter-spacing: 0.3rem;
-    }
-
-    /* 时间显示 */
-    .datetime {
-      text-align: center;
-      margin-bottom: 3rem;
-      color: #6a6050;
-    }
-    .datetime .date { font-size: 1.1rem; letter-spacing: 0.2rem; }
-    .datetime .time { font-size: 2rem; font-weight: 300; margin-top: 0.3rem; letter-spacing: 0.15rem; }
-
-    /* 应用卡片 */
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 240px));
-      gap: 28px;
+    .poem-refresh-btn {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 1px solid rgba(126, 114, 97, 0.28);
+      background: rgba(255, 252, 247, 0.45);
+      color: #7c7265;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
       justify-content: center;
-      max-width: 900px;
-      width: 90%;
+      transition: all 0.2s;
+    }
+    .poem-refresh-btn:hover {
+      color: #5f5548;
+      border-color: rgba(126, 114, 97, 0.45);
+      background: rgba(255, 252, 247, 0.75);
+    }
+    .poem .line {
+      font-size: 20px;
+      line-height: 1.8;
+      color: #2e2a25;
+      white-space: pre-wrap;
+    }
+    .poem .line.collapsed {
+      max-height: 7.2em;
+      overflow: hidden;
+      position: relative;
+    }
+    .poem .line.collapsed::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2.4em;
+      background: linear-gradient(180deg, rgba(247,243,236,0), rgba(247,243,236,0.95));
+    }
+    .poem .meta {
+      margin-top: 10px;
+      color: #756a5b;
+      font-size: 13px;
+    }
+    .poem-toggle {
+      margin-top: 8px;
+      border: 1px solid rgba(126, 114, 97, 0.35);
+      background: rgba(255, 252, 247, 0.72);
+      color: #5f5548;
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .poem-toggle:hover {
+      background: rgba(255, 252, 247, 0.92);
+    }
+
+    .grid {
+      margin-top: 4vh;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(190px, 1fr));
+      gap: 16px;
+      width: min(1100px, 100%);
     }
 
     .card {
-      background: rgba(255, 252, 245, 0.65);
-      backdrop-filter: blur(16px);
-      border: 1px solid rgba(160, 145, 120, 0.25);
-      border-radius: 12px;
-      padding: 36px 24px 28px;
-      text-align: center;
       text-decoration: none;
-      color: #4a4035;
-      transition: all 0.4s ease;
-      cursor: pointer;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, transparent, #8a7d6b, transparent);
-      opacity: 0;
-      transition: opacity 0.4s;
+      color: #3b342c;
+      background: rgba(252, 249, 244, 0.62);
+      border: 1px solid rgba(128, 115, 95, 0.22);
+      border-radius: 12px;
+      padding: 18px 16px;
+      transition: transform 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+      box-shadow: 0 8px 22px rgba(73, 61, 45, 0.08);
+      min-height: 122px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
     }
 
     .card:hover {
-      background: rgba(255, 252, 245, 0.85);
-      transform: translateY(-6px);
-      box-shadow: 0 16px 48px rgba(80, 60, 30, 0.12);
+      transform: translateY(-4px);
+      background: rgba(255, 252, 247, 0.82);
+      box-shadow: 0 16px 30px rgba(73, 61, 45, 0.15);
     }
 
-    .card:hover::before { opacity: 1; }
-
-    .card .icon {
-      font-size: 2.2rem;
-      margin-bottom: 14px;
-      display: block;
-    }
-
-    .card .name {
-      font-size: 1.1rem;
-      font-weight: 500;
-      margin-bottom: 8px;
-      letter-spacing: 0.15rem;
-    }
-
-    .card .desc {
-      font-size: 0.8rem;
-      color: #8a7d6b;
-      line-height: 1.6;
-      letter-spacing: 0.05rem;
-    }
-
-    .card.coming-soon { opacity: 0.55; }
-    .card.coming-soon:hover { transform: none; box-shadow: none; cursor: default; }
-
-    /* 底部诗句 */
-    .footer {
-      position: fixed;
-      bottom: 2rem;
-      left: 0;
-      right: 0;
-      text-align: center;
-      z-index: 10;
-      color: #8a7d6b;
-      font-size: 0.85rem;
-      letter-spacing: 0.3rem;
-      font-style: italic;
-    }
+    .card .icon { font-size: 24px; }
+    .card .name { font-size: 18px; letter-spacing: 0.12rem; }
+    .card .desc { font-size: 12px; color: #7d7367; line-height: 1.6; }
 
     .logout-btn {
       position: fixed;
-      top: 20px;
       right: 24px;
-      z-index: 20;
-      background: rgba(255, 252, 245, 0.6);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(160, 145, 120, 0.3);
+      bottom: 24px;
+      width: 42px;
+      height: 42px;
       border-radius: 50%;
-      width: 40px;
-      height: 40px;
+      border: 1px solid rgba(120, 107, 89, 0.35);
+      background: rgba(252, 248, 242, 0.8);
+      color: #6a6258;
+      cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      cursor: pointer;
-      color: #7a7060;
-      transition: all 0.3s;
+      z-index: 20;
+      transition: all 0.2s;
     }
     .logout-btn:hover {
-      background: rgba(255, 252, 245, 0.9);
-      color: #a05040;
-      box-shadow: 0 4px 16px rgba(80, 60, 30, 0.12);
+      color: #a24b42;
+      background: rgba(255, 252, 247, 0.95);
+    }
+
+    @media (max-width: 980px) {
+      body { overflow: auto; }
+      .shell { padding: 20px 16px 22px; min-height: auto; }
+      .topbar { flex-direction: column; gap: 12px; }
+      .clock { text-align: left; }
+      .grid { margin-top: 20px; grid-template-columns: 1fr 1fr; }
+      .poem .line { font-size: 18px; }
     }
 
     @media (max-width: 600px) {
-      .header h1 { font-size: 1.8rem; letter-spacing: 0.3rem; }
-      .grid { grid-template-columns: 1fr; padding: 0 20px; }
-      .content { padding-top: 8vh; }
+      .grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
+<div class="ink-bg"></div>
 
-<div class="bg"></div>
-
-<!-- 山水SVG -->
-<svg class="mountains" viewBox="0 0 1440 600" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- 远山 -->
-  <path d="M0,300 Q180,120 360,280 Q540,100 720,260 Q900,80 1080,240 Q1260,120 1440,300 L1440,600 L0,600 Z" fill="rgba(120,130,110,0.25)" />
-  <!-- 中山 -->
-  <path d="M0,380 Q120,220 300,350 Q420,180 600,320 Q780,160 960,300 Q1140,200 1320,340 Q1380,310 1440,380 L1440,600 L0,600 Z" fill="rgba(100,115,95,0.35)" />
-  <!-- 近山 -->
-  <path d="M0,440 Q200,300 400,420 Q500,340 700,400 Q850,300 1000,380 Q1150,320 1300,410 Q1370,380 1440,440 L1440,600 L0,600 Z" fill="rgba(80,95,75,0.4)" />
-  <!-- 水面 -->
-  <path d="M0,500 Q360,480 720,500 Q1080,480 1440,500 L1440,600 L0,600 Z" fill="rgba(140,160,150,0.3)" />
-  <path d="M0,530 Q360,520 720,535 Q1080,520 1440,530 L1440,600 L0,600 Z" fill="rgba(130,150,140,0.2)" />
+<svg class="mountain-wrap" viewBox="0 0 1440 900" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M0,430 Q180,220 360,380 Q520,220 700,370 Q860,210 1040,350 Q1220,240 1440,420 L1440,900 L0,900 Z" fill="rgba(66, 71, 67, 0.33)" />
+  <path d="M0,520 Q160,330 350,500 Q520,320 760,520 Q970,330 1180,510 Q1320,390 1440,540 L1440,900 L0,900 Z" fill="rgba(56, 60, 57, 0.36)" />
+  <path d="M0,620 Q220,470 430,610 Q640,470 890,620 Q1140,470 1440,640 L1440,900 L0,900 Z" fill="rgba(46, 50, 47, 0.40)" />
 </svg>
 
-<!-- 雾气 -->
-<svg class="mist mist-1" viewBox="0 0 2880 120" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-  <ellipse cx="400" cy="60" rx="500" ry="40" fill="rgba(220,215,200,0.5)" />
-  <ellipse cx="1200" cy="50" rx="600" ry="35" fill="rgba(220,215,200,0.4)" />
-  <ellipse cx="2000" cy="65" rx="450" ry="38" fill="rgba(220,215,200,0.45)" />
-  <ellipse cx="2800" cy="55" rx="500" ry="42" fill="rgba(220,215,200,0.4)" />
+<svg class="mist top" viewBox="0 0 2880 160" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="500" cy="80" rx="540" ry="58" fill="rgba(234,230,220,0.58)" />
+  <ellipse cx="1450" cy="72" rx="600" ry="52" fill="rgba(234,230,220,0.45)" />
+  <ellipse cx="2380" cy="88" rx="500" ry="56" fill="rgba(234,230,220,0.48)" />
 </svg>
-<svg class="mist mist-2" viewBox="0 0 2880 120" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-  <ellipse cx="300" cy="55" rx="450" ry="35" fill="rgba(210,205,190,0.4)" />
-  <ellipse cx="1000" cy="60" rx="550" ry="30" fill="rgba(210,205,190,0.35)" />
-  <ellipse cx="1800" cy="50" rx="400" ry="38" fill="rgba(210,205,190,0.4)" />
-  <ellipse cx="2600" cy="58" rx="480" ry="32" fill="rgba(210,205,190,0.35)" />
+<svg class="mist mid" viewBox="0 0 2880 160" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="420" cy="76" rx="560" ry="54" fill="rgba(226,220,208,0.45)" />
+  <ellipse cx="1300" cy="82" rx="620" ry="50" fill="rgba(226,220,208,0.38)" />
+  <ellipse cx="2260" cy="74" rx="520" ry="52" fill="rgba(226,220,208,0.40)" />
 </svg>
 
-<div class="content">
-  <div class="header">
-    <h1>骁遥骑士</h1>
-    <div class="line"></div>
-    <div class="subtitle">心之所向 素履以往</div>
+<div class="shell">
+  <div class="topbar">
+    <div class="brand">
+      <h1>骁遥骑士</h1>
+      <div class="slogan">行到水穷处 坐看云起时</div>
+    </div>
+    <div class="clock">
+      <div class="date" id="date"></div>
+      <div class="time" id="time"></div>
+    </div>
   </div>
 
-  <div class="datetime">
-    <div class="date" id="date"></div>
-    <div class="time" id="time"></div>
+  <div class="poem">
+    <div class="poem-head">
+      <div class="title">每日一诗</div>
+      <button class="poem-refresh-btn" id="poemRefreshBtn" title="换一首">↻</button>
+    </div>
+    <div class="line" id="poemLine"></div>
+    <div class="meta" id="poemMeta"></div>
+    <button class="poem-toggle" id="poemToggle" style="display:none;">展开全文</button>
   </div>
 
   <div class="grid">
     <a class="card" href="/trading/">
-      <span class="icon">📊</span>
+      <div class="icon">📊</div>
       <div class="name">交易记录</div>
-      <div class="desc">多品种交易记录<br>可视化统计与复盘分析</div>
-    </a>
-    <a class="card" href="/monitor/">
-      <span class="icon">🖥</span>
-      <div class="name">服务器监控</div>
-      <div class="desc">CPU 内存 磁盘 网络<br>实时系统状态监控</div>
+      <div class="desc">交易流水 · 统计分析 · 复盘改进</div>
     </a>
     <a class="card" href="/notes/">
-      <span class="icon">📝</span>
+      <div class="icon">📝</div>
       <div class="name">知识笔记</div>
-      <div class="desc">日记记录与文档管理<br>富文本编辑器</div>
+      <div class="desc">日记文档 · 待办管理 · 回收站</div>
     </a>
     <a class="card" href="/news/index.html">
-      <span class="icon">📰</span>
+      <div class="icon">📰</div>
       <div class="name">新闻实事</div>
-      <div class="desc">获取最新经济学人<br>中文翻译阅读</div>
+      <div class="desc">今日新闻 · Economist · 中文优先</div>
+    </a>
+    <a class="card" href="/monitor/">
+      <div class="icon">🖥</div>
+      <div class="name">服务器监控</div>
+      <div class="desc">CPU 内存 磁盘 网络 · 实时监控</div>
     </a>
   </div>
 </div>
-
-<div class="footer">行到水穷处 坐看云起时</div>
 
 <button class="logout-btn" id="logoutBtn" title="退出登录">
   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -287,6 +312,17 @@
 </button>
 
 <script>
+  const POEMS = [
+    { text: '岱宗夫如何？齐鲁青未了。\n造化钟神秀，阴阳割昏晓。\n荡胸生曾云，决眦入归鸟。\n会当凌绝顶，一览众山小。', title: '望岳', author: '杜甫' },
+    { text: '君不见黄河之水天上来，奔流到海不复回。\n君不见高堂明镜悲白发，朝如青丝暮成雪。\n人生得意须尽欢，莫使金樽空对月。\n天生我材必有用，千金散尽还复来。\n烹羊宰牛且为乐，会须一饮三百杯。\n岑夫子，丹丘生，将进酒，杯莫停。\n与君歌一曲，请君为我倾耳听。\n钟鼓馔玉不足贵，但愿长醉不愿醒。\n古来圣贤皆寂寞，惟有饮者留其名。\n陈王昔时宴平乐，斗酒十千恣欢谑。\n主人何为言少钱，径须沽取对君酌。\n五花马，千金裘，呼儿将出换美酒，与尔同销万古愁。', title: '将进酒', author: '李白' },
+    { text: '明月几时有？把酒问青天。\n不知天上宫阙，今夕是何年。\n我欲乘风归去，又恐琼楼玉宇，高处不胜寒。\n起舞弄清影，何似在人间。\n转朱阁，低绮户，照无眠。\n不应有恨，何事长向别时圆？\n人有悲欢离合，月有阴晴圆缺，此事古难全。\n但愿人长久，千里共婵娟。', title: '水调歌头', author: '苏轼' },
+    { text: '莫听穿林打叶声，何妨吟啸且徐行。\n竹杖芒鞋轻胜马，谁怕？一蓑烟雨任平生。\n料峭春风吹酒醒，微冷，山头斜照却相迎。\n回首向来萧瑟处，归去，也无风雨也无晴。', title: '定风波', author: '苏轼' },
+    { text: '大江东去，浪淘尽，千古风流人物。\n故垒西边，人道是，三国周郎赤壁。\n乱石穿空，惊涛拍岸，卷起千堆雪。\n江山如画，一时多少豪杰。\n遥想公瑾当年，小乔初嫁了，雄姿英发。\n羽扇纶巾，谈笑间，樯橹灰飞烟灭。\n故国神游，多情应笑我，早生华发。\n人生如梦，一尊还酹江月。', title: '念奴娇·赤壁怀古', author: '苏轼' },
+    { text: '醉里挑灯看剑，梦回吹角连营。\n八百里分麾下炙，五十弦翻塞外声，沙场秋点兵。\n马作的卢飞快，弓如霹雳弦惊。\n了却君王天下事，赢得生前身后名。可怜白发生。', title: '破阵子', author: '辛弃疾' },
+    { text: '北国风光，千里冰封，万里雪飘。\n望长城内外，惟余莽莽；大河上下，顿失滔滔。\n山舞银蛇，原驰蜡象，欲与天公试比高。\n须晴日，看红装素裹，分外妖娆。\n江山如此多娇，引无数英雄竞折腰。\n惜秦皇汉武，略输文采；唐宗宋祖，稍逊风骚。\n一代天骄，成吉思汗，只识弯弓射大雕。\n俱往矣，数风流人物，还看今朝。', title: '沁园春·雪', author: '毛泽东' },
+    { text: '钟山风雨起苍黄，百万雄师过大江。\n虎踞龙盘今胜昔，天翻地覆慨而慷。\n宜将剩勇追穷寇，不可沽名学霸王。\n天若有情天亦老，人间正道是沧桑。', title: '七律·人民解放军占领南京', author: '毛泽东' }
+  ];
+
   (async () => {
     try {
       const res = await fetch('/api/auth/check');
@@ -303,6 +339,12 @@
     location.href = '/login';
   });
 
+  function dayOfYear(d) {
+    const start = new Date(d.getFullYear(), 0, 0);
+    const diff = d - start;
+    return Math.floor(diff / 86400000);
+  }
+
   function updateTime() {
     const now = new Date();
     const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
@@ -310,15 +352,73 @@
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const d = String(now.getDate()).padStart(2, '0');
     const w = weekdays[now.getDay()];
-    document.getElementById('date').textContent = `${y} 年 ${m} 月 ${d} 日　星期${w}`;
+    document.getElementById('date').textContent = `${y} 年 ${m} 月 ${d} 日  星期${w}`;
+
     const h = String(now.getHours()).padStart(2, '0');
     const min = String(now.getMinutes()).padStart(2, '0');
     const s = String(now.getSeconds()).padStart(2, '0');
     document.getElementById('time').textContent = `${h}:${min}:${s}`;
   }
+
+  function renderPoemObject(p) {
+    const poemLine = document.getElementById('poemLine');
+    const poemToggle = document.getElementById('poemToggle');
+    const text = (p && p.text ? String(p.text) : '').trim();
+    const title = (p && p.title ? String(p.title) : '无题').trim();
+    const author = (p && p.author ? String(p.author) : '佚名').trim();
+    const source = (p && p.source ? String(p.source) : '本地').trim();
+    poemLine.textContent = text || '暂时没有可展示的诗词';
+    document.getElementById('poemMeta').textContent = `《${title}》 · ${author} · ${source}`;
+    const isLong = poemLine.textContent.length > 70 || poemLine.textContent.split('\n').length > 3;
+    poemLine.classList.toggle('collapsed', isLong);
+    poemToggle.style.display = isLong ? 'inline-block' : 'none';
+    poemToggle.textContent = '展开全文';
+    poemToggle.onclick = () => {
+      const opened = !poemLine.classList.contains('collapsed');
+      if (opened) {
+        poemLine.classList.add('collapsed');
+        poemToggle.textContent = '展开全文';
+      } else {
+        poemLine.classList.remove('collapsed');
+        poemToggle.textContent = '收起';
+      }
+    };
+  }
+
+  function renderPoemByIndex(idx) {
+    const p = POEMS[idx % POEMS.length];
+    renderPoemObject(p);
+  }
+
+  async function fetchOnlinePoem(refresh = false) {
+    const url = refresh ? '/api/poem/daily?refresh=1' : '/api/poem/daily';
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`poem api ${res.status}`);
+    return await res.json();
+  }
+
+  function randomNextIndex(currentIdx) {
+    if (POEMS.length <= 1) return currentIdx;
+    let next = currentIdx;
+    while (next === currentIdx) {
+      next = Math.floor(Math.random() * POEMS.length);
+    }
+    return next;
+  }
+
   updateTime();
+  let currentPoemIndex = dayOfYear(new Date()) % POEMS.length;
+  fetchOnlinePoem(false).then(renderPoemObject).catch(() => renderPoemByIndex(currentPoemIndex));
+  document.getElementById('poemRefreshBtn').addEventListener('click', async () => {
+    try {
+      const poem = await fetchOnlinePoem(true);
+      renderPoemObject(poem);
+    } catch (_) {
+      currentPoemIndex = randomNextIndex(currentPoemIndex);
+      renderPoemByIndex(currentPoemIndex);
+    }
+  });
   setInterval(updateTime, 1000);
 </script>
-
 </body>
 </html>

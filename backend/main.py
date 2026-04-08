@@ -58,6 +58,11 @@ def _migrate_legacy_schema():
             db.execute(text("ALTER TABLE notebooks ADD COLUMN parent_id INTEGER"))
         if "sort_order" not in notebook_cols:
             db.execute(text("ALTER TABLE notebooks ADD COLUMN sort_order INTEGER DEFAULT 0"))
+        note_cols = _column_names(db, "notes")
+        if "is_deleted" not in note_cols:
+            db.execute(text("ALTER TABLE notes ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
+        if "deleted_at" not in note_cols:
+            db.execute(text("ALTER TABLE notes ADD COLUMN deleted_at DATETIME"))
         db.commit()
     finally:
         db.close()
@@ -481,7 +486,7 @@ def list_notes(
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Note)
+    q = db.query(Note).filter(Note.is_deleted == False)  # noqa: E712
     if notebook_id:
         q = q.filter(Note.notebook_id == notebook_id)
     if note_type:
@@ -507,13 +512,13 @@ def list_notes(
 @app.get("/api/notes/stats")
 def note_stats(db: Session = Depends(get_db)):
     from sqlalchemy import func as sqlfunc
-    diary_count = db.query(Note).filter(Note.note_type == "diary").count()
-    doc_count = db.query(Note).filter(Note.note_type == "doc").count()
-    diary_words = db.query(sqlfunc.coalesce(sqlfunc.sum(Note.word_count), 0)).filter(Note.note_type == "diary").scalar()
-    doc_words = db.query(sqlfunc.coalesce(sqlfunc.sum(Note.word_count), 0)).filter(Note.note_type == "doc").scalar()
+    diary_count = db.query(Note).filter(Note.note_type == "diary", Note.is_deleted == False).count()  # noqa: E712
+    doc_count = db.query(Note).filter(Note.note_type == "doc", Note.is_deleted == False).count()  # noqa: E712
+    diary_words = db.query(sqlfunc.coalesce(sqlfunc.sum(Note.word_count), 0)).filter(Note.note_type == "diary", Note.is_deleted == False).scalar()  # noqa: E712
+    doc_words = db.query(sqlfunc.coalesce(sqlfunc.sum(Note.word_count), 0)).filter(Note.note_type == "doc", Note.is_deleted == False).scalar()  # noqa: E712
     recent_docs = (
         db.query(Note)
-        .filter(Note.note_type == "doc")
+        .filter(Note.note_type == "doc", Note.is_deleted == False)  # noqa: E712
         .order_by(Note.updated_at.desc())
         .limit(8)
         .all()
@@ -541,6 +546,7 @@ def history_today(db: Session = Depends(get_db)):
         .filter(
             Note.note_type == "diary",
             Note.note_date.isnot(None),
+            Note.is_deleted == False,  # noqa: E712
             sqlfunc.strftime("%m-%d", Note.note_date) == md,
             sqlfunc.strftime("%Y", Note.note_date) != str(today.year),
         )
@@ -558,7 +564,7 @@ def diary_tree(db: Session = Depends(get_db)):
     from sqlalchemy import func as sqlfunc
     notes = (
         db.query(Note.id, Note.title, Note.note_date)
-        .filter(Note.note_type == "diary", Note.note_date.isnot(None))
+        .filter(Note.note_type == "diary", Note.note_date.isnot(None), Note.is_deleted == False)  # noqa: E712
         .order_by(Note.note_date.desc())
         .all()
     )
@@ -617,7 +623,7 @@ def diary_summaries(
     db: Session = Depends(get_db),
 ):
     from sqlalchemy import extract
-    q = db.query(Note).filter(Note.note_type == "diary", Note.note_date.isnot(None))
+    q = db.query(Note).filter(Note.note_type == "diary", Note.note_date.isnot(None), Note.is_deleted == False)  # noqa: E712
     q = q.filter(extract("year", Note.note_date) == year)
     if month is not None:
         q = q.filter(extract("month", Note.note_date) == month)
@@ -644,6 +650,7 @@ def notes_calendar(
         .filter(
             Note.note_type == "diary",
             Note.note_date.isnot(None),
+            Note.is_deleted == False,  # noqa: E712
             extract("year", Note.note_date) == year,
             extract("month", Note.note_date) == month,
         )
@@ -667,7 +674,7 @@ def create_note(data: NoteCreate, db: Session = Depends(get_db)):
 
 @app.get("/api/notes/{note_id}", response_model=NoteResponse)
 def get_note(note_id: int, db: Session = Depends(get_db)):
-    n = db.query(Note).filter(Note.id == note_id).first()
+    n = db.query(Note).filter(Note.id == note_id, Note.is_deleted == False).first()  # noqa: E712
     if not n:
         raise HTTPException(404, "Note not found")
     return n
@@ -675,7 +682,7 @@ def get_note(note_id: int, db: Session = Depends(get_db)):
 
 @app.put("/api/notes/{note_id}", response_model=NoteResponse)
 def update_note(note_id: int, data: NoteUpdate, db: Session = Depends(get_db)):
-    n = db.query(Note).filter(Note.id == note_id).first()
+    n = db.query(Note).filter(Note.id == note_id, Note.is_deleted == False).first()  # noqa: E712
     if not n:
         raise HTTPException(404, "Note not found")
     for k, v in data.model_dump(exclude_unset=True).items():
@@ -687,6 +694,40 @@ def update_note(note_id: int, data: NoteUpdate, db: Session = Depends(get_db)):
 
 @app.delete("/api/notes/{note_id}")
 def delete_note(note_id: int, db: Session = Depends(get_db)):
+    n = db.query(Note).filter(Note.id == note_id, Note.is_deleted == False).first()  # noqa: E712
+    if not n:
+        raise HTTPException(404, "Note not found")
+    n.is_deleted = True
+    n.deleted_at = datetime.now()
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/recycle/notes", response_model=List[NoteResponse])
+def list_recycle_notes(
+    note_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Note).filter(Note.is_deleted == True)  # noqa: E712
+    if note_type:
+        q = q.filter(Note.note_type == note_type)
+    return q.order_by(Note.deleted_at.desc()).all()
+
+
+@app.post("/api/recycle/notes/{note_id}/restore", response_model=NoteResponse)
+def restore_note(note_id: int, db: Session = Depends(get_db)):
+    n = db.query(Note).filter(Note.id == note_id, Note.is_deleted == True).first()  # noqa: E712
+    if not n:
+        raise HTTPException(404, "Note not found in recycle bin")
+    n.is_deleted = False
+    n.deleted_at = None
+    db.commit()
+    db.refresh(n)
+    return n
+
+
+@app.delete("/api/recycle/notes/{note_id}/purge")
+def purge_note(note_id: int, db: Session = Depends(get_db)):
     n = db.query(Note).filter(Note.id == note_id).first()
     if not n:
         raise HTTPException(404, "Note not found")
@@ -760,6 +801,67 @@ def delete_todo(todo_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+def _build_poem_payload(entry: dict, source: str) -> dict:
+    title = (entry.get("title") or "").strip() or "无题"
+    author = (entry.get("author") or "").strip() or "佚名"
+    text_val = (entry.get("text") or "").strip()
+    if not text_val:
+        raise ValueError("poem text empty")
+    return {
+        "title": title,
+        "author": author,
+        "text": text_val,
+        "source": source,
+        "fetched_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def _fetch_remote_poem() -> dict:
+    with httpx.Client(timeout=8) as client:
+        resp = client.get(POEM_REMOTE_URL, headers={"User-Agent": "Mozilla/5.0"})
+    resp.raise_for_status()
+    raw = resp.json()
+    data = raw.get("data") if isinstance(raw, dict) else {}
+    origin = data.get("origin") if isinstance(data, dict) else {}
+    lines = origin.get("content") if isinstance(origin, dict) else None
+    if isinstance(lines, list):
+        text_val = "\n".join(str(x).strip() for x in lines if str(x).strip()).strip()
+    else:
+        text_val = (data.get("content") or "").strip()
+    return _build_poem_payload(
+        {
+            "title": origin.get("title") if isinstance(origin, dict) else None,
+            "author": origin.get("author") if isinstance(origin, dict) else None,
+            "text": text_val,
+        },
+        "今日诗词",
+    )
+
+
+def _fallback_poem() -> dict:
+    idx = int(datetime.now().strftime("%j")) % len(POEM_FALLBACKS)
+    return _build_poem_payload(POEM_FALLBACKS[idx], "本地兜底")
+
+
+@app.get("/api/poem/daily")
+def get_daily_poem(refresh: bool = Query(False)):
+    now_ts = _time.time()
+    if not refresh:
+        with _poem_lock:
+            updated_at = _poem_cache["updated_at"]
+            payload = _poem_cache["payload"]
+            if payload and updated_at and (now_ts - updated_at) < POEM_CACHE_TTL:
+                return payload
+    try:
+        payload = _fetch_remote_poem()
+    except Exception:
+        payload = _fallback_poem()
+    with _poem_lock:
+        _poem_cache["updated_at"] = now_ts
+        _poem_cache["payload"] = payload
+    return payload
+
+
 
 # ── News ──
 
@@ -785,6 +887,27 @@ _today_news_cache = {"updated_at": None, "payload": None}
 TODAY_NEWS_CACHE_TTL = int(os.environ.get("TODAY_NEWS_CACHE_TTL", "900"))
 TODAY_NEWS_SOURCE_BLOCKLIST = {"时政微周刊"}
 _article_content_cache = {}
+_poem_lock = threading.Lock()
+_poem_cache = {"updated_at": None, "payload": None}
+POEM_CACHE_TTL = int(os.environ.get("POEM_CACHE_TTL", "1800"))
+POEM_REMOTE_URL = os.environ.get("POEM_REMOTE_URL", "https://v2.jinrishici.com/sentence")
+POEM_FALLBACKS = [
+    {
+        "title": "望岳",
+        "author": "杜甫",
+        "text": "岱宗夫如何？齐鲁青未了。\n造化钟神秀，阴阳割昏晓。\n荡胸生曾云，决眦入归鸟。\n会当凌绝顶，一览众山小。",
+    },
+    {
+        "title": "水调歌头",
+        "author": "苏轼",
+        "text": "明月几时有？把酒问青天。\n不知天上宫阙，今夕是何年。\n我欲乘风归去，又恐琼楼玉宇，高处不胜寒。\n起舞弄清影，何似在人间。\n转朱阁，低绮户，照无眠。\n不应有恨，何事长向别时圆？\n人有悲欢离合，月有阴晴圆缺，此事古难全。\n但愿人长久，千里共婵娟。",
+    },
+    {
+        "title": "沁园春·雪",
+        "author": "毛泽东",
+        "text": "北国风光，千里冰封，万里雪飘。\n望长城内外，惟余莽莽；大河上下，顿失滔滔。\n山舞银蛇，原驰蜡象，欲与天公试比高。\n须晴日，看红装素裹，分外妖娆。\n江山如此多娇，引无数英雄竞折腰。\n惜秦皇汉武，略输文采；唐宗宋祖，稍逊风骚。\n一代天骄，成吉思汗，只识弯弓射大雕。\n俱往矣，数风流人物，还看今朝。",
+    },
+]
 
 TODAY_NEWS_FEEDS = {
     "经济": [

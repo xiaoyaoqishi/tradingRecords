@@ -229,8 +229,13 @@ export default function App() {
   return (
     <div className="news-page">
       <header className="news-header">
-        <a href="/" className="back-link">← 返回工作台</a>
-        <Title level={3} style={{ margin: '8px 0 0' }}>新闻实事</Title>
+        <a href="/" className="news-back-btn" title="返回工作台">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 8l-4 4 4 4M8 12h8"/>
+          </svg>
+        </a>
+        <Title level={3} style={{ margin: 0 }}>新闻实事</Title>
       </header>
 
       <div className="two-col-layout" style={{ gridTemplateColumns: `${leftWidth}px 8px 1fr` }}>

@@ -11,14 +11,30 @@ body {
 }
 
 .news-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 12px;
 }
 
-.back-link {
-  color: #3498db;
+.news-back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: rgba(44, 62, 80, 0.65);
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
   text-decoration: none;
+  transition: all 0.2s;
+  background: #fff;
 }
-.back-link:hover { text-decoration: underline; }
+.news-back-btn:hover {
+  color: #2c3e50;
+  border-color: #a9b7c9;
+  background: #f7fbff;
+}
 
 .two-col-layout {
   display: grid;

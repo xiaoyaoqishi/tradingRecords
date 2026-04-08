@@ -4,6 +4,7 @@ import HomePage from './components/HomePage';
 import DiaryView from './components/DiaryView';
 import DocView from './components/DocView';
 import TodoView from './components/TodoView';
+import RecycleView from './components/RecycleView';
 import SettingsModal from './components/SettingsModal';
 import { notebookApi } from './api';
 
@@ -50,6 +51,8 @@ export default function App() {
         );
       case 'todo':
         return <TodoView />;
+      case 'recycle':
+        return <RecycleView onNavigate={handleNavigate} />;
       default:
         return null;
     }
