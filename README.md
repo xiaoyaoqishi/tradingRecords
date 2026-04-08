@@ -252,6 +252,22 @@ cd program/frontend-news && npm install
 cd program/frontend-monitor && npm install
 ```
 
+**启动本地服务**（推荐一键）：
+
+```bash
+cd program
+./dev.sh
+```
+
+常用命令：
+
+```bash
+./dev.sh status   # 查看状态
+./dev.sh attach   # 进入 tmux 会话看日志
+./dev.sh down     # 停止全部服务
+./dev.sh restart  # 重启全部服务
+```
+
 **启动本地服务**（开多个终端）：
 
 ```bash
@@ -267,11 +283,11 @@ npm run dev
 cd program/frontend-notes
 npm run dev
 
-# 终端 4 — 新闻前端 → http://localhost:5175/news/
+# 终端 4 — 新闻前端 → http://localhost:5176/news/
 cd program/frontend-news
 npm run dev
 
-# 终端 5 — 监控前端 → http://localhost:5176/monitor/
+# 终端 5 — 监控前端 → http://localhost:5175/monitor/
 cd program/frontend-monitor
 npm run dev
 ```

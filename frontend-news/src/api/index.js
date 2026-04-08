@@ -20,6 +20,7 @@ export const newsApi = {
   translate: (id) => api.post(`/news/issues/${id}/translate`),
   progress: (id) => api.get(`/news/issues/${id}/progress`),
   today: (params = {}) => api.get('/news/today', { params }),
+  articleContent: (url) => api.get('/news/article-content', { params: { url } }),
 };
 
 export default api;

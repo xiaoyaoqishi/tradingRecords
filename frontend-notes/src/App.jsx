@@ -3,6 +3,7 @@ import IconSidebar from './components/IconSidebar';
 import HomePage from './components/HomePage';
 import DiaryView from './components/DiaryView';
 import DocView from './components/DocView';
+import TodoView from './components/TodoView';
 import SettingsModal from './components/SettingsModal';
 import { notebookApi } from './api';
 
@@ -47,6 +48,8 @@ export default function App() {
             onReloadNotebooks={loadNotebooks}
           />
         );
+      case 'todo':
+        return <TodoView />;
       default:
         return null;
     }

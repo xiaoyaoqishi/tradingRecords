@@ -29,6 +29,14 @@ export const noteApi = {
   stats: () => api.get('/notes/stats'),
   historyToday: () => api.get('/notes/history-today'),
   diaryTree: () => api.get('/notes/diary-tree'),
+  diarySummaries: (params) => api.get('/notes/diary-summaries', { params }),
+};
+
+export const todoApi = {
+  list: (params) => api.get('/todos', { params }),
+  create: (data) => api.post('/todos', data),
+  update: (id, data) => api.put(`/todos/${id}`, data),
+  delete: (id) => api.delete(`/todos/${id}`),
 };
 
 export default api;

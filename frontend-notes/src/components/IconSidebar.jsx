@@ -2,6 +2,7 @@ import {
   HomeOutlined,
   EditOutlined,
   FileTextOutlined,
+  CheckSquareOutlined,
   SettingOutlined,
   LogoutOutlined,
 } from '@ant-design/icons';
@@ -10,6 +11,7 @@ const tabs = [
   { key: 'home', icon: <HomeOutlined />, label: '首页' },
   { key: 'diary', icon: <EditOutlined />, label: '日记' },
   { key: 'doc', icon: <FileTextOutlined />, label: '文档' },
+  { key: 'todo', icon: <CheckSquareOutlined />, label: '待办' },
 ];
 
 export default function IconSidebar({ activeTab, onTabChange, onOpenSettings }) {

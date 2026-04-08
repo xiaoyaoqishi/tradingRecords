@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { message } from 'antd';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -21,18 +22,25 @@ import { common, createLowlight } from 'lowlight';
 import { Markdown } from 'tiptap-markdown';
 import MarkdownIt from 'markdown-it';
 import dayjs from 'dayjs';
-import api from '../api';
+import api, { todoApi } from '../api';
 
 const lowlight = createLowlight(common);
 const markdownParser = new MarkdownIt({ html: true, breaks: true, linkify: true });
 
 const SETTINGS_KEY = 'notes-editor-settings';
+const DEFAULT_EDITOR_SETTINGS = {
+  fontFamily: 'STKaiti, KaiTi, serif',
+  fontSize: '20px',
+};
 export function loadEditorSettings() {
-  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; }
-  catch { return {}; }
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
+    return { ...DEFAULT_EDITOR_SETTINGS, ...saved };
+  }
+  catch { return DEFAULT_EDITOR_SETTINGS; }
 }
 export function saveEditorSettings(s) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...DEFAULT_EDITOR_SETTINGS, ...(s || {}) }));
 }
 
 export const FONT_SIZES = ['12px', '14px', '16px', '18px', '20px', '24px', '28px', '32px'];
@@ -459,6 +467,28 @@ export default function NoteEditor({ note, onUpdate, defaultEditing = false }) {
   if (settings.fontFamily) editorStyle.fontFamily = settings.fontFamily;
   if (settings.fontSize) editorStyle.fontSize = settings.fontSize;
 
+  const isDoc = note?.note_type === 'doc';
+
+  const addSelectionToTodo = async () => {
+    if (!(isDiary || isDoc) || !editor) return;
+    const { from, to } = editor.state.selection;
+    const text = editor.state.doc.textBetween(from, to, '\n').trim();
+    if (!text) {
+      message.warning('请先选中要加入待办的内容');
+      return;
+    }
+    try {
+      await todoApi.create({
+        content: text,
+        priority: 'medium',
+        source_note_id: note.id,
+      });
+      message.success('已加入稍后待办');
+    } catch (e) {
+      message.error(e.response?.data?.detail || '添加待办失败');
+    }
+  };
+
   return (
     <div className={`editor-panel ${mode === 'edit' ? '' : 'readonly'}`}>
       <div className="editor-header">
@@ -467,6 +497,11 @@ export default function NoteEditor({ note, onUpdate, defaultEditing = false }) {
             <div className="editor-date-header">📅 {dateDisplay}</div>
           )}
           <div style={{ flex: 1 }} />
+          {(isDiary || isDoc) && mode === 'edit' && (
+            <button className="todo-capture-btn" onClick={addSelectionToTodo}>
+              + 加入稍后待办
+            </button>
+          )}
           <div className="mode-toggle-group">
             <button className={`mode-btn ${mode === 'read' ? 'active' : ''}`} onClick={() => switchMode('read')} title="阅读模式">📖 阅读</button>
             <button className={`mode-btn ${mode === 'edit' ? 'active' : ''}`} onClick={() => switchMode('edit')} title="编辑模式">✏️ 编辑</button>

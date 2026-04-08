@@ -7,22 +7,17 @@ import NoteEditor from './NoteEditor';
 import MiniCalendar from './MiniCalendar';
 import dayjs from 'dayjs';
 
-const DIARY_TAGS = [
-  { key: 'all', label: '全部日记', icon: '📒' },
-  { key: '工作笔记', label: '工作笔记', icon: '💼' },
-  { key: '生活杂记', label: '生活杂记', icon: '🏠' },
-  { key: '心情随笔', label: '心情随笔', icon: '💭' },
-];
-
 export default function DiaryView({ initialNoteId, notebooks }) {
   const [activeNote, setActiveNote] = useState(null);
   const [tree, setTree] = useState({});
   const [expandedYears, setExpandedYears] = useState({});
   const [expandedMonths, setExpandedMonths] = useState({});
-  const [activeTag, setActiveTag] = useState('all');
   const [keyword, setKeyword] = useState('');
   const [calendarDates, setCalendarDates] = useState([]);
   const [selectedDate, setSelectedDate] = useState(dayjs());
+  const [summaryTitle, setSummaryTitle] = useState('');
+  const [summaries, setSummaries] = useState([]);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const saveTimer = useRef(null);
   const creatingToday = useRef(false);
 
@@ -68,6 +63,8 @@ export default function DiaryView({ initialNoteId, notebooks }) {
       const res = await noteApi.list({ note_type: 'diary', note_date: todayStr });
       if (res.data.length > 0) {
         setActiveNote(res.data[0]);
+        setSummaryTitle('');
+        setSummaries([]);
       } else {
         const nb = notebooks[0];
         if (!nb) { message.warning('请先创建笔记本'); creatingToday.current = false; return; }
@@ -87,6 +84,8 @@ export default function DiaryView({ initialNoteId, notebooks }) {
           note_date: todayStr,
         });
         setActiveNote(newNote.data);
+        setSummaryTitle('');
+        setSummaries([]);
         loadTree();
         loadCalendar(selectedDate);
       }
@@ -101,6 +100,8 @@ export default function DiaryView({ initialNoteId, notebooks }) {
       const res = await noteApi.list({ note_type: 'diary', note_date: dateStr });
       if (res.data.length > 0) {
         setActiveNote(res.data[0]);
+        setSummaryTitle('');
+        setSummaries([]);
       } else {
         setActiveNote(null);
       }
@@ -111,7 +112,41 @@ export default function DiaryView({ initialNoteId, notebooks }) {
     try {
       const res = await noteApi.get(noteId);
       setActiveNote(res.data);
+      setSummaryTitle('');
+      setSummaries([]);
     } catch {}
+  };
+
+  const loadSummary = async (year, month = null, title = '') => {
+    setSummaryLoading(true);
+    setSummaryTitle(title);
+    setActiveNote(null);
+    try {
+      const res = await noteApi.diarySummaries({ year, month });
+      setSummaries(res.data || []);
+    } catch {
+      setSummaries([]);
+      message.error('加载梗概失败');
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  const handleYearClick = (yearLabel) => {
+    setExpandedYears(prev => ({ ...prev, [yearLabel]: !prev[yearLabel] }));
+    const year = parseInt(String(yearLabel).replace('年', ''), 10);
+    if (Number.isFinite(year)) {
+      loadSummary(year, null, `${year}年日记梗概`);
+    }
+  };
+
+  const handleMonthClick = (yearLabel, monthLabel) => {
+    setExpandedMonths(prev => ({ ...prev, [`${yearLabel}-${monthLabel}`]: !prev[`${yearLabel}-${monthLabel}`] }));
+    const year = parseInt(String(yearLabel).replace('年', ''), 10);
+    const month = parseInt(String(monthLabel).replace('月', ''), 10);
+    if (Number.isFinite(year) && Number.isFinite(month)) {
+      loadSummary(year, month, `${year}年${month}月日记梗概`);
+    }
   };
 
   const handleUpdateNote = useCallback(async (id, updates) => {
@@ -168,20 +203,6 @@ export default function DiaryView({ initialNoteId, notebooks }) {
           />
         </div>
 
-        <div className="side-tags">
-          <div className="side-tags-header">标签：</div>
-          {DIARY_TAGS.map(t => (
-            <div
-              key={t.key}
-              className={`tag-item ${activeTag === t.key ? 'active' : ''}`}
-              onClick={() => setActiveTag(t.key)}
-            >
-              {t.icon} {t.label}
-              {t.key === 'all' && <span className="tag-count">({totalCount})</span>}
-            </div>
-          ))}
-        </div>
-
         <button className="write-today-btn" onClick={handleWriteToday}>
           ✏️ 写今天的日记
         </button>
@@ -191,7 +212,7 @@ export default function DiaryView({ initialNoteId, notebooks }) {
             <div key={year}>
               <div
                 className="tree-year"
-                onClick={() => setExpandedYears(prev => ({ ...prev, [year]: !prev[year] }))}
+                onClick={() => handleYearClick(year)}
               >
                 {expandedYears[year] ? '▾' : '▸'} 📂 {year}
               </div>
@@ -199,7 +220,7 @@ export default function DiaryView({ initialNoteId, notebooks }) {
                 <div key={month} style={{ paddingLeft: 12 }}>
                   <div
                     className="tree-month"
-                    onClick={() => setExpandedMonths(prev => ({ ...prev, [`${year}-${month}`]: !prev[`${year}-${month}`] }))}
+                    onClick={() => handleMonthClick(year, month)}
                   >
                     {expandedMonths[`${year}-${month}`] ? '▾' : '▸'} 📁 {month}
                   </div>
@@ -235,6 +256,24 @@ export default function DiaryView({ initialNoteId, notebooks }) {
             onUpdate={handleUpdateNote}
             defaultEditing={activeNote.note_date === dayjs().format('YYYY-MM-DD')}
           />
+        ) : summaryTitle ? (
+          <div className="diary-summary-panel">
+            <div className="diary-summary-title">{summaryTitle}</div>
+            {summaryLoading ? (
+              <div className="empty-hint">加载中...</div>
+            ) : summaries.length > 0 ? (
+              <div className="diary-summary-list">
+                {summaries.map((item) => (
+                  <div key={item.id} className="diary-summary-row" onClick={() => handleSelectTreeNote(item.id)}>
+                    <span className="diary-summary-date">{item.note_date}</span>
+                    <span className="diary-summary-text">{item.summary}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-hint">该范围暂无日记</div>
+            )}
+          </div>
         ) : (
           <div className="empty-editor">
             <div className="empty-icon">📝</div>

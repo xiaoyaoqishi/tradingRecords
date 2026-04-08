@@ -1,18 +1,18 @@
 import { useState, useEffect } from 'react';
-import { noteApi } from '../api';
+import { noteApi, todoApi } from '../api';
 import { getWeather } from '../utils/weather';
 import { Lunar, Solar } from 'lunar-javascript';
 import dayjs from 'dayjs';
 
 export default function HomePage({ onNavigate }) {
   const [stats, setStats] = useState(null);
-  const [history, setHistory] = useState([]);
   const [weather, setWeather] = useState(null);
+  const [todos, setTodos] = useState([]);
 
   useEffect(() => {
     noteApi.stats().then(r => setStats(r.data)).catch(() => {});
-    noteApi.historyToday().then(r => setHistory(r.data)).catch(() => {});
     getWeather().then(setWeather);
+    todoApi.list().then((r) => setTodos(r.data || [])).catch(() => {});
   }, []);
 
   const now = dayjs();
@@ -31,9 +31,15 @@ export default function HomePage({ onNavigate }) {
     };
   });
 
+  const priorityLabel = (p) => {
+    if (p === 'high') return '高';
+    if (p === 'low') return '低';
+    return '中';
+  };
+  const pendingTodos = todos.filter((t) => !t.is_completed);
+
   return (
     <div className="home-page">
-      {/* eDiary-style header */}
       <div className="home-header">
         <div className="home-header-left">
           <div className="home-date-primary">今天：</div>
@@ -62,7 +68,6 @@ export default function HomePage({ onNavigate }) {
         )}
       </div>
 
-      {/* Main content 3 columns */}
       <div className="home-body">
         <div className="home-section home-stats">
           <h3>知识笔记概览</h3>
@@ -112,18 +117,24 @@ export default function HomePage({ onNavigate }) {
           ))}
         </div>
 
-        <div className="home-section home-history">
-          <h3>历史上的今天</h3>
-          <div className="history-group">
-            <h4>我的历史</h4>
-            {history.length > 0 ? (
-              history.map(h => (
-                <div key={h.id} className="history-item" onClick={() => onNavigate('diary', h.id)}>
-                  <span className="history-date">[{h.note_date}]</span> {h.title}
+        <div className="home-section home-todo">
+          <div className="todo-board-head">
+            <h3>稍后待办看板</h3>
+            <button className="todo-add-btn" onClick={() => onNavigate('todo')}>进入待办模块</button>
+          </div>
+          <div className="todo-list">
+            {pendingTodos.length > 0 ? pendingTodos.slice(0, 10).map((t) => (
+              <div key={t.id} className={`todo-item ${t.is_completed ? 'done' : ''}`}>
+                <div className="todo-row">
+                  <span>{t.is_completed ? '✅' : '⬜'} {t.content}</span>
                 </div>
-              ))
-            ) : (
-              <div className="empty-hint">今天没有历史日记</div>
+                <div className="todo-row todo-meta">
+                  <span className={`todo-priority priority-${t.priority}`}>优先级: {priorityLabel(t.priority)}</span>
+                  <span className="todo-time">添加于 {dayjs(t.created_at).format('YYYY-MM-DD HH:mm:ss')}</span>
+                </div>
+              </div>
+            )) : (
+              <div className="empty-hint">暂无待办事项</div>
             )}
           </div>
         </div>

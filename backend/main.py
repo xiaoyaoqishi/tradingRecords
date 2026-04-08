@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import Optional, List
 from pydantic import BaseModel
 import json
@@ -18,6 +19,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime, date
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -29,17 +31,39 @@ from bs4 import BeautifulSoup
 DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
 
 from database import engine, get_db, Base, SessionLocal
-from models import Trade, Review, Notebook, Note, NewsIssue
+from models import Trade, Review, Notebook, Note, TodoItem, NewsIssue
 from schemas import (
     TradeCreate, TradeUpdate, TradeResponse,
     ReviewCreate, ReviewUpdate, ReviewResponse,
     NotebookCreate, NotebookUpdate, NotebookResponse,
     NoteCreate, NoteUpdate, NoteResponse,
+    TodoCreate, TodoUpdate, TodoResponse,
     NewsIssueResponse, NewsIssueDetailResponse,
 )
 from auth import load_credentials, save_credentials, check_login, create_token, verify_token
 
 Base.metadata.create_all(bind=engine)
+
+
+def _column_names(db: Session, table: str) -> set[str]:
+    rows = db.execute(text(f"PRAGMA table_info({table})")).fetchall()
+    return {row[1] for row in rows}
+
+
+def _migrate_legacy_schema():
+    db = SessionLocal()
+    try:
+        notebook_cols = _column_names(db, "notebooks")
+        if "parent_id" not in notebook_cols:
+            db.execute(text("ALTER TABLE notebooks ADD COLUMN parent_id INTEGER"))
+        if "sort_order" not in notebook_cols:
+            db.execute(text("ALTER TABLE notebooks ADD COLUMN sort_order INTEGER DEFAULT 0"))
+        db.commit()
+    finally:
+        db.close()
+
+
+_migrate_legacy_schema()
 
 
 def _init_default_notebooks():
@@ -56,6 +80,15 @@ def _init_default_notebooks():
 
 
 _init_default_notebooks()
+
+TODO_PRIORITIES = {"low", "medium", "high"}
+
+
+def _normalize_todo_priority(priority: Optional[str]) -> str:
+    val = (priority or "medium").strip().lower()
+    if val not in TODO_PRIORITIES:
+        raise HTTPException(400, "priority 必须是 low / medium / high")
+    return val
 
 app = FastAPI(title="交易记录系统")
 
@@ -540,6 +573,65 @@ def diary_tree(db: Session = Depends(get_db)):
     return tree
 
 
+def _extract_tiptap_text(node) -> str:
+    if isinstance(node, dict):
+        parts = []
+        txt = node.get("text")
+        if isinstance(txt, str) and txt.strip():
+            parts.append(txt.strip())
+        content = node.get("content")
+        if isinstance(content, list):
+            for child in content:
+                child_txt = _extract_tiptap_text(child)
+                if child_txt:
+                    parts.append(child_txt)
+        return " ".join(parts).strip()
+    if isinstance(node, list):
+        return " ".join(filter(None, (_extract_tiptap_text(x) for x in node))).strip()
+    return ""
+
+
+def _note_summary_text(content: Optional[str], title: Optional[str]) -> str:
+    fallback = (title or "").strip() or "（无内容）"
+    if not content:
+        return fallback
+    raw = str(content).strip()
+    if not raw:
+        return fallback
+    text_out = ""
+    try:
+        obj = json.loads(raw)
+        text_out = _extract_tiptap_text(obj)
+    except Exception:
+        text_out = BeautifulSoup(raw, "html.parser").get_text(" ", strip=True)
+    text_out = re.sub(r"\s+", " ", text_out).strip()
+    if not text_out:
+        return fallback
+    return text_out[:120]
+
+
+@app.get("/api/notes/diary-summaries")
+def diary_summaries(
+    year: int = Query(..., ge=1970, le=2100),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy import extract
+    q = db.query(Note).filter(Note.note_type == "diary", Note.note_date.isnot(None))
+    q = q.filter(extract("year", Note.note_date) == year)
+    if month is not None:
+        q = q.filter(extract("month", Note.note_date) == month)
+    notes = q.order_by(Note.note_date.asc()).all()
+    return [
+        {
+            "id": n.id,
+            "note_date": str(n.note_date),
+            "summary": _note_summary_text(n.content, n.title),
+        }
+        for n in notes
+    ]
+
+
 @app.get("/api/notes/calendar")
 def notes_calendar(
     year: int = Query(...),
@@ -603,6 +695,71 @@ def delete_note(note_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@app.get("/api/todos", response_model=List[TodoResponse])
+def list_todos(
+    include_completed: bool = Query(True),
+    db: Session = Depends(get_db),
+):
+    q = db.query(TodoItem)
+    if not include_completed:
+        q = q.filter(TodoItem.is_completed == False)  # noqa: E712
+    items = q.order_by(TodoItem.is_completed.asc(), TodoItem.created_at.desc()).all()
+    priority_rank = {"high": 0, "medium": 1, "low": 2}
+    items.sort(key=lambda x: (1 if x.is_completed else 0, priority_rank.get(x.priority, 1), -(x.created_at.timestamp() if x.created_at else 0)))
+    return items
+
+
+@app.post("/api/todos", response_model=TodoResponse)
+def create_todo(data: TodoCreate, db: Session = Depends(get_db)):
+    content = (data.content or "").strip()
+    if not content:
+        raise HTTPException(400, "待办内容不能为空")
+    priority = _normalize_todo_priority(data.priority)
+    if data.source_note_id is not None:
+        src = db.query(Note).filter(Note.id == data.source_note_id).first()
+        if not src:
+            raise HTTPException(404, "source_note_id 对应日记不存在")
+    obj = TodoItem(
+        content=content,
+        priority=priority,
+        is_completed=False,
+        source_note_id=data.source_note_id,
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@app.put("/api/todos/{todo_id}", response_model=TodoResponse)
+def update_todo(todo_id: int, data: TodoUpdate, db: Session = Depends(get_db)):
+    obj = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not obj:
+        raise HTTPException(404, "Todo not found")
+    updates = data.model_dump(exclude_unset=True)
+    if "content" in updates:
+        updates["content"] = (updates["content"] or "").strip()
+        if not updates["content"]:
+            raise HTTPException(400, "待办内容不能为空")
+    if "priority" in updates:
+        updates["priority"] = _normalize_todo_priority(updates["priority"])
+    for k, v in updates.items():
+        setattr(obj, k, v)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@app.delete("/api/todos/{todo_id}")
+def delete_todo(todo_id: int, db: Session = Depends(get_db)):
+    obj = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not obj:
+        raise HTTPException(404, "Todo not found")
+    db.delete(obj)
+    db.commit()
+    return {"ok": True}
+
+
 
 # ── News ──
 
@@ -626,23 +783,25 @@ _news_translate_progress: dict[int, dict] = {}
 _today_news_lock = threading.Lock()
 _today_news_cache = {"updated_at": None, "payload": None}
 TODAY_NEWS_CACHE_TTL = int(os.environ.get("TODAY_NEWS_CACHE_TTL", "900"))
+TODAY_NEWS_SOURCE_BLOCKLIST = {"时政微周刊"}
+_article_content_cache = {}
 
 TODAY_NEWS_FEEDS = {
     "经济": [
-        ("Reuters Business", "https://feeds.reuters.com/reuters/businessNews"),
-        ("FT World", "https://www.ft.com/world?format=rss"),
+        ("Google News 中文", "https://news.google.com/rss/search?q=%E7%BB%8F%E6%B5%8E&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+        ("Google News 财经", "https://news.google.com/rss/search?q=%E8%B4%A2%E7%BB%8F&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
     ],
     "时政": [
-        ("Reuters World", "https://feeds.reuters.com/Reuters/worldNews"),
-        ("BBC World", "http://feeds.bbci.co.uk/news/world/rss.xml"),
+        ("Google News 时政", "https://news.google.com/rss/search?q=%E6%97%B6%E6%94%BF&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+        ("Google News 国际", "https://news.google.com/rss/search?q=%E5%9B%BD%E9%99%85+%E6%94%BF%E6%B2%BB&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
     ],
     "AI": [
-        ("TechCrunch AI", "https://techcrunch.com/category/artificial-intelligence/feed/"),
-        ("VentureBeat AI", "https://venturebeat.com/category/ai/feed/"),
+        ("Google News AI", "https://news.google.com/rss/search?q=AI&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+        ("Google News 人工智能", "https://news.google.com/rss/search?q=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
     ],
     "科技": [
-        ("Reuters Technology", "https://feeds.reuters.com/reuters/technologyNews"),
-        ("The Verge", "https://www.theverge.com/rss/index.xml"),
+        ("Google News 科技", "https://news.google.com/rss/search?q=%E7%A7%91%E6%8A%80&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+        ("Google News 芯片", "https://news.google.com/rss/search?q=%E8%8A%AF%E7%89%87&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
     ],
 }
 
@@ -1147,6 +1306,51 @@ def _fetch_today_feed(source_name: str, feed_url: str, limit: int) -> List[dict]
         return []
 
 
+def _extract_article_text_from_html(html_text: str) -> str:
+    soup = BeautifulSoup(html_text, "html.parser")
+    for bad in soup(["script", "style", "noscript", "nav", "footer", "header", "aside"]):
+        bad.decompose()
+
+    article = soup.find("article")
+    container = article or soup.find("main") or soup.body or soup
+
+    paragraphs = []
+    for p in container.find_all("p"):
+        txt = p.get_text(" ", strip=True)
+        if len(txt) >= 20:
+            paragraphs.append(txt)
+    if not paragraphs:
+        txt = container.get_text("\n", strip=True)
+        txt = re.sub(r"\n{3,}", "\n\n", txt)
+        return txt[:12000]
+    return "\n\n".join(paragraphs)[:12000]
+
+
+def _fetch_article_content(url: str) -> dict:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(400, "URL 非法")
+
+    cached = _article_content_cache.get(url)
+    if cached and (_time.time() - cached["ts"] < 3600):
+        return cached["data"]
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
+    with httpx.Client(timeout=20, follow_redirects=True, headers=headers) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        html_text = resp.text
+
+    soup = BeautifulSoup(html_text, "html.parser")
+    title = (soup.title.get_text(strip=True) if soup.title else "").strip()
+    content = _extract_article_text_from_html(html_text)
+    data = {"url": url, "title": title, "content": content}
+    _article_content_cache[url] = {"ts": _time.time(), "data": data}
+    return data
+
+
 def _build_today_news(limit_per_category: int = 8) -> dict:
     categories = []
 
@@ -1158,6 +1362,9 @@ def _build_today_news(limit_per_category: int = 8) -> dict:
         dedup = []
         seen = set()
         for item in merged:
+            source_name = (item.get("source") or "").strip()
+            if source_name in TODAY_NEWS_SOURCE_BLOCKLIST:
+                continue
             key = item.get("url") or item.get("title")
             if not key or key in seen:
                 continue
@@ -1197,6 +1404,14 @@ def get_today_news(
         _today_news_cache["payload"] = payload
 
     return payload
+
+
+@app.get("/api/news/article-content")
+def get_news_article_content(url: str = Query(..., min_length=8)):
+    try:
+        return _fetch_article_content(url)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"抓取原文失败: {e}")
 
 
 # ══════════════════════════════════════════

@@ -155,6 +155,19 @@ class Note(Base):
     notebook = relationship("Notebook", back_populates="notes")
 
 
+class TodoItem(Base):
+    __tablename__ = "todo_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    content = Column(Text, nullable=False)
+    is_completed = Column(Boolean, default=False)
+    priority = Column(String(10), default="medium")
+    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
+
+
 class NewsIssue(Base):
     __tablename__ = "news_issues"
 
@@ -174,4 +187,3 @@ class NewsIssue(Base):
     content_zh = Column(Text, default="")
     status = Column(String(30), default="downloaded")
     translated_at = Column(DateTime, nullable=True)
-

@@ -1,81 +1,88 @@
 body {
   margin: 0;
-  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', serif;
-  background: linear-gradient(180deg, #f6f3ec, #ece6d9);
-  color: #3e3428;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: #f5f6f8;
+  color: #333;
 }
 
 .news-page {
   min-height: 100vh;
-  padding: 20px 24px;
+  padding: 16px 24px;
 }
 
 .news-header {
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .back-link {
-  color: #7b6248;
+  color: #3498db;
   text-decoration: none;
 }
+.back-link:hover { text-decoration: underline; }
 
 .two-col-layout {
   display: grid;
-  grid-template-columns: 360px 1fr;
-  gap: 14px;
-  height: calc(100vh - 120px);
+  grid-template-columns: 360px 8px 1fr;
+  gap: 12px;
+  height: calc(100vh - 110px);
 }
 
 .left-panel {
-  background: #f8f1e4;
-  border: 1px solid #e5d7be;
-  border-radius: 12px;
+  background: #f5f6f8;
+  border: 1px solid #e4e6ea;
+  border-radius: 8px;
   padding: 12px;
   overflow: auto;
 }
 
 .folder-title {
-  font-weight: 700;
+  font-weight: 600;
   margin-bottom: 10px;
-  color: #6b5139;
+  color: #555;
 }
 
 .folder-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 8px 10px;
   cursor: pointer;
   margin-bottom: 6px;
+  color: #555;
+  transition: all 0.2s;
 }
 
-.folder-item:hover,
+.folder-item:hover {
+  background: rgba(0,0,0,0.04);
+}
+
 .folder-item.active {
-  background: #efe2cb;
+  background: #e3effd;
+  color: #2980b9;
 }
 
 .sub-folder-box {
   margin-top: 12px;
-  border-top: 1px dashed #d8c4a2;
+  border-top: 1px solid #e4e6ea;
   padding-top: 10px;
 }
 
 .sub-folder-header {
   font-size: 13px;
-  color: #7b6348;
+  color: #888;
   margin-bottom: 8px;
 }
 
 .issue-row {
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 8px !important;
 }
 
 .issue-row.active,
 .issue-row:hover {
-  background: #f2ebdc;
+  background: #e3effd;
 }
 
 .issue-row-left {
@@ -84,7 +91,7 @@ body {
 }
 
 .issue-name {
-  font-weight: 600;
+  font-weight: 500;
   margin-bottom: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -92,12 +99,24 @@ body {
 }
 
 .issue-delete {
-  color: #b64e4e;
+  color: #e74c3c;
   font-size: 15px;
 }
 
 .right-panel {
   overflow: auto;
+}
+
+.drag-divider {
+  width: 8px;
+  cursor: col-resize;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #e4e6ea, #d9dde3);
+  border: 1px solid #d0d5dc;
+}
+.drag-divider:hover {
+  background: linear-gradient(180deg, #d6e8ff, #c8defd);
+  border-color: #9ec5ff;
 }
 
 .toolbar {
@@ -118,7 +137,7 @@ body {
 }
 
 .empty-reader {
-  color: #8a7d6b;
+  color: #999;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -126,13 +145,22 @@ body {
 
 .reader-text {
   white-space: pre-wrap;
-  line-height: 1.8;
+  line-height: 1.7;
+}
+
+.ant-card {
+  border-radius: 8px;
+  border-color: #e4e6ea;
 }
 
 @media (max-width: 980px) {
   .two-col-layout {
     grid-template-columns: 1fr;
     height: auto;
+  }
+
+  .drag-divider {
+    display: none;
   }
 
   .left-panel,

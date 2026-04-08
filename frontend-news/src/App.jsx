@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, List, Popconfirm, Progress, Space, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, FolderOpenOutlined, FolderOutlined, GlobalOutlined, ReadOutlined, ReloadOutlined, SyncOutlined, TranslationOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -29,9 +29,27 @@ export default function App() {
 
   const [todayLoading, setTodayLoading] = useState(false);
   const [todayData, setTodayData] = useState({ updated_at: null, categories: [] });
+  const [todayActiveKey, setTodayActiveKey] = useState(null);
+  const [todayArticleLoading, setTodayArticleLoading] = useState(false);
+  const [todayArticle, setTodayArticle] = useState(null);
+  const [leftWidth, setLeftWidth] = useState(360);
+  const draggingRef = useRef(false);
 
   const pollRef = useRef(null);
   const active = useMemo(() => items.find(i => i.id === activeId) || null, [items, activeId]);
+  const todayItems = useMemo(() => {
+    const list = [];
+    (todayData.categories || []).forEach((cat) => {
+      (cat.items || []).forEach((it, idx) => {
+        list.push({ ...it, category: cat.name, _key: `${cat.name}-${idx}-${it.url || it.title}` });
+      });
+    });
+    return list;
+  }, [todayData]);
+  const todayActive = useMemo(
+    () => todayItems.find((x) => x._key === todayActiveKey) || todayItems[0] || null,
+    [todayItems, todayActiveKey]
+  );
 
   const loadList = async () => {
     setLoading(true);
@@ -89,13 +107,63 @@ export default function App() {
     setTodayLoading(true);
     try {
       const res = await newsApi.today({ force_refresh: force, limit: 8 });
-      setTodayData(res.data || { updated_at: null, categories: [] });
+      const payload = res.data || { updated_at: null, categories: [] };
+      setTodayData(payload);
+      const flat = [];
+      (payload.categories || []).forEach((cat) => {
+        (cat.items || []).forEach((it, idx) => {
+          flat.push({ ...it, _key: `${cat.name}-${idx}-${it.url || it.title}` });
+        });
+      });
+      setTodayActiveKey(flat[0]?._key || null);
     } catch (e) {
       message.error(e.response?.data?.detail || '获取今日新闻失败');
     } finally {
       setTodayLoading(false);
     }
   };
+
+  const loadTodayArticle = useCallback(async (url) => {
+    if (!url) {
+      setTodayArticle(null);
+      return;
+    }
+    setTodayArticleLoading(true);
+    try {
+      const res = await newsApi.articleContent(url);
+      setTodayArticle(res.data);
+    } catch (e) {
+      setTodayArticle({ url, title: '', content: '' });
+      message.warning(e.response?.data?.detail || '原文抓取失败，已回退摘要');
+    } finally {
+      setTodayArticleLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (moduleKey === 'today' && todayActive?.url) {
+      loadTodayArticle(todayActive.url);
+    }
+  }, [moduleKey, todayActive?._key, todayActive?.url, loadTodayArticle]);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!draggingRef.current) return;
+      const next = Math.max(280, Math.min(620, e.clientX - 24));
+      setLeftWidth(next);
+    };
+    const onUp = () => {
+      draggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
 
   useEffect(() => { loadList(); }, []);
   useEffect(() => { loadDetail(activeId); pullProgress(activeId); }, [activeId]);
@@ -165,7 +233,7 @@ export default function App() {
         <Title level={3} style={{ margin: '8px 0 0' }}>新闻实事</Title>
       </header>
 
-      <div className="two-col-layout">
+      <div className="two-col-layout" style={{ gridTemplateColumns: `${leftWidth}px 8px 1fr` }}>
         <aside className="left-panel">
           <div className="folder-title">📁 子模块</div>
           <div className={`folder-item ${moduleKey === 'economist' ? 'active' : ''}`} onClick={() => setModuleKey('economist')}>
@@ -202,7 +270,37 @@ export default function App() {
               />
             </div>
           )}
+
+          {moduleKey === 'today' && (
+            <div className="sub-folder-box">
+              <div className="sub-folder-header">📂 今日新闻 / 条目</div>
+              <List
+                loading={todayLoading}
+                dataSource={todayItems}
+                locale={{ emptyText: '暂无今日新闻，点击右侧刷新' }}
+                renderItem={(it) => (
+                  <List.Item className={`issue-row ${todayActive?._key === it._key ? 'active' : ''}`} onClick={() => setTodayActiveKey(it._key)}>
+                    <div className="issue-row-left">
+                      <div className="issue-name">📰 {it.title}</div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {it.category} · {it.published_at ? dayjs(it.published_at).format('MM-DD HH:mm') : '时间未知'}
+                      </Text>
+                    </div>
+                  </List.Item>
+                )}
+              />
+            </div>
+          )}
         </aside>
+
+        <div
+          className="drag-divider"
+          onMouseDown={() => {
+            draggingRef.current = true;
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+          }}
+        />
 
         <main className="right-panel">
           {moduleKey === 'economist' && (
@@ -245,31 +343,32 @@ export default function App() {
               <div className="toolbar">
                 <Space>
                   <Button icon={<ReloadOutlined />} onClick={() => loadTodayNews(true)} loading={todayLoading}>刷新今日新闻</Button>
-                  <Tag color="geekblue">仅展示有出处的新闻</Tag>
+                  <Tag color="geekblue">中文优先来源</Tag>
                 </Space>
                 <Text type="secondary">更新时间：{todayData.updated_at ? dayjs(todayData.updated_at).format('YYYY-MM-DD HH:mm:ss') : '—'}</Text>
               </div>
 
-              {(todayData.categories || []).map((cat) => (
-                <Card key={cat.name} title={`📁 ${cat.name}`} style={{ marginBottom: 12 }}>
-                  <List
-                    dataSource={cat.items || []}
-                    locale={{ emptyText: '暂无来源数据' }}
-                    renderItem={(it) => (
-                      <List.Item>
-                        <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                          <Link href={it.url} target="_blank" rel="noreferrer">{it.title}</Link>
-                          <Space size={8} wrap>
-                            <Tag icon={<GlobalOutlined />} color="blue">{it.source}</Tag>
-                            {it.published_at && <Tag>{dayjs(it.published_at).format('MM-DD HH:mm')}</Tag>}
-                          </Space>
-                          {it.summary && <Text type="secondary">{it.summary}</Text>}
-                        </Space>
-                      </List.Item>
+              <Card title={todayActive?.title || '今日新闻内容'}>
+                {!todayActive ? (
+                  <div className="empty-reader"><ReadOutlined /> 左侧选择一条新闻后查看内容</div>
+                ) : (
+                  <div className="reader-content">
+                    <Space size={8} wrap style={{ marginBottom: 10 }}>
+                      <Tag color="blue">{todayActive.category}</Tag>
+                      <Tag icon={<GlobalOutlined />} color="geekblue">来源：{todayActive.source || '未知'}</Tag>
+                      <Tag>时间：{todayActive.published_at ? dayjs(todayActive.published_at).format('YYYY-MM-DD HH:mm:ss') : '未知'}</Tag>
+                    </Space>
+                    {todayArticleLoading ? (
+                      <Paragraph type="secondary">正在抓取原文正文...</Paragraph>
+                    ) : (
+                      <Paragraph className="reader-text">
+                        {todayArticle?.content || todayActive.summary || todayActive.title}
+                      </Paragraph>
                     )}
-                  />
-                </Card>
-              ))}
+                    <Link href={todayActive.url} target="_blank" rel="noreferrer">查看原文</Link>
+                  </div>
+                )}
+              </Card>
             </>
           )}
         </main>

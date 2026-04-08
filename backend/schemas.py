@@ -263,6 +263,34 @@ class NoteResponse(NoteCreate):
         from_attributes = True
 
 
+# ── Todo ──
+
+
+class TodoCreate(BaseModel):
+    content: str
+    priority: Optional[str] = "medium"
+    source_note_id: Optional[int] = None
+
+
+class TodoUpdate(BaseModel):
+    content: Optional[str] = None
+    is_completed: Optional[bool] = None
+    priority: Optional[str] = None
+
+
+class TodoResponse(BaseModel):
+    id: int
+    content: str
+    is_completed: bool
+    priority: str
+    source_note_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 # ── News ──
 
 
@@ -286,4 +314,3 @@ class NewsIssueResponse(BaseModel):
 class NewsIssueDetailResponse(NewsIssueResponse):
     content_en: Optional[str] = ""
     content_zh: Optional[str] = ""
-

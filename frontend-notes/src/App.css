@@ -272,6 +272,8 @@ body {
 
 .tree-folder-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.15s; }
 .tree-folder:hover .tree-folder-actions { opacity: 1; }
+.tree-file-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.15s; }
+.tree-file:hover .tree-file-actions { opacity: 1; }
 .tree-action-icon { font-size: 12px; color: #999; cursor: pointer; padding: 2px; }
 .tree-action-icon:hover { color: #3498db; }
 .tree-action-icon.danger:hover { color: #e74c3c; }
@@ -341,6 +343,20 @@ body {
   color: #fff;
 }
 .mode-btn.active:hover { background: #2980b9; }
+
+.todo-capture-btn {
+  padding: 5px 10px;
+  border: 1px solid #9dc6ff;
+  background: #f0f7ff;
+  color: #2269c6;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-right: 10px;
+}
+.todo-capture-btn:hover {
+  background: #e3effd;
+}
 
 .editor-title-input {
   width: 100%;
@@ -449,9 +465,7 @@ body {
   line-height: 1.8;
   color: #333;
 }
-.editor-content {
-  font-size: 15px;
-}
+.editor-content { font-size: 20px; }
 .editor-content .tiptap h1 { font-size: 1.8em; margin: 0.5em 0; }
 .editor-content .tiptap h2 { font-size: 1.5em; margin: 0.4em 0; }
 .editor-content .tiptap h3 { font-size: 1.25em; margin: 0.3em 0; }
@@ -826,6 +840,188 @@ body {
 .history-date { color: #999; font-size: 12px; }
 
 .empty-hint { color: #ccc; font-size: 13px; padding: 8px 0; }
+
+.diary-summary-panel {
+  flex: 1;
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+.diary-summary-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #2c3e50;
+}
+.diary-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.diary-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #e8edf3;
+  border-radius: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.diary-summary-row:hover {
+  background: #f0f7ff;
+  border-color: #cfe2ff;
+}
+.diary-summary-date {
+  min-width: 106px;
+  color: #678;
+  font-size: 12px;
+}
+.diary-summary-text {
+  color: #333;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.todo-create {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.todo-input {
+  flex: 1;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 13px;
+}
+.todo-input:focus {
+  outline: none;
+  border-color: #7fb0ff;
+}
+.todo-add-btn {
+  border: 1px solid #3498db;
+  background: #3498db;
+  color: #fff;
+  border-radius: 6px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+.todo-add-btn:hover { background: #2980b9; }
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.todo-item {
+  border: 1px solid #eceff4;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fafcff;
+}
+.todo-item.done {
+  opacity: 0.75;
+  background: #f7f7f7;
+}
+.todo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.todo-meta {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #777;
+}
+.todo-content-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  border-bottom: 1px dashed transparent;
+  padding: 3px 2px;
+  font-size: 13px;
+}
+.todo-content-input:focus {
+  outline: none;
+  border-bottom-color: #9ec5ff;
+}
+.todo-item.done .todo-content-input {
+  text-decoration: line-through;
+  color: #999;
+}
+.todo-priority {
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.priority-high { color: #c0392b; }
+.priority-medium { color: #9c640c; }
+.priority-low { color: #2e7d32; }
+.todo-priority-text { white-space: nowrap; }
+.todo-time { margin-left: auto; color: #999; }
+.todo-del-btn {
+  border: none;
+  background: transparent;
+  color: #d35454;
+  cursor: pointer;
+}
+.todo-del-btn:hover { color: #b33939; text-decoration: underline; }
+
+.todo-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.todo-board-head h3 { margin-bottom: 0; }
+
+.todo-side-panel {
+  width: 260px;
+  min-width: 260px;
+}
+
+.todo-view-main {
+  flex: 1;
+  padding: 20px 22px;
+  overflow-y: auto;
+}
+.todo-view-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: #333;
+}
+
+.todo-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.todo-bulk-btn {
+  border: 1px solid #d9d9d9;
+  background: #fff;
+  color: #555;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.todo-bulk-btn:hover { border-color: #3498db; color: #3498db; }
+.todo-bulk-btn.primary {
+  background: #3498db;
+  border-color: #3498db;
+  color: #fff;
+}
+.todo-bulk-btn.primary:hover { background: #2980b9; border-color: #2980b9; }
+.todo-bulk-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: #888;
+}
 
 /* ── Nested Folder Indent ── */
 .tree-children { padding-left: 16px; }

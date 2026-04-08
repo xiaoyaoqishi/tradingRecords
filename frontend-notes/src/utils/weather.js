@@ -36,50 +36,122 @@ const DEFAULT_LOCATION = {
   province: '深圳市',
 };
 
+const CACHE_KEY = 'weather_cache_v1';
+const CACHE_MS = 30 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 2500;
+const GEO_TIMEOUT_MS = 1500;
+
 function parseWMO(code) {
   return WMO_MAP[code] || { icon: '🌈', text: '未知' };
 }
 
 let _cache = null;
 let _cacheTime = 0;
-const CACHE_MS = 30 * 60 * 1000;
+
+function buildFallback() {
+  return {
+    icon: '🌤️',
+    text: '天气获取失败',
+    temp: 0,
+    city: DEFAULT_LOCATION.city,
+    province: DEFAULT_LOCATION.province,
+    forecast: [],
+  };
+}
+
+function readStorageCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.data || !parsed?.time) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageCache(data, time) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, time }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+async function fetchJsonWithTimeout(url, timeout = FETCH_TIMEOUT_MS, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function getGeoPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('geolocation unsupported'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      timeout: GEO_TIMEOUT_MS,
+      maximumAge: 10 * 60 * 1000,
+      enableHighAccuracy: false,
+    });
+  });
+}
 
 export async function getWeather() {
   if (_cache && Date.now() - _cacheTime < CACHE_MS) return _cache;
 
+  const storageCache = readStorageCache();
+  if (storageCache && Date.now() - storageCache.time < CACHE_MS) {
+    _cache = storageCache.data;
+    _cacheTime = storageCache.time;
+    return _cache;
+  }
+
+  let latitude = DEFAULT_LOCATION.latitude;
+  let longitude = DEFAULT_LOCATION.longitude;
+  let city = DEFAULT_LOCATION.city;
+  let province = DEFAULT_LOCATION.province;
+
   try {
-    let latitude = DEFAULT_LOCATION.latitude;
-    let longitude = DEFAULT_LOCATION.longitude;
-    let city = DEFAULT_LOCATION.city;
-    let province = DEFAULT_LOCATION.province;
+    const pos = await getGeoPosition();
+    latitude = pos.coords.latitude;
+    longitude = pos.coords.longitude;
+  } catch {
+    // use default location
+  }
 
-    try {
-      const pos = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
-      });
-      latitude = pos.coords.latitude;
-      longitude = pos.coords.longitude;
-    } catch {
-      // 获取不到地理位置时使用默认：深圳市龙华区
-    }
+  try {
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=3`;
+    const cityUrl = `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&accept-language=zh`;
 
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=3`;
-    const res = await fetch(url);
-    const data = await res.json();
+    const [weatherResult, cityResult] = await Promise.allSettled([
+      fetchJsonWithTimeout(weatherUrl),
+      fetchJsonWithTimeout(cityUrl, FETCH_TIMEOUT_MS, {
+        headers: { 'Accept-Language': 'zh-CN,zh;q=0.9' },
+      }),
+    ]);
 
+    if (weatherResult.status !== 'fulfilled') throw weatherResult.reason;
+
+    const data = weatherResult.value;
     const current = data.current;
-    const wmo = parseWMO(current.weather_code);
+    if (!current) throw new Error('invalid weather payload');
 
-    try {
-      const cityRes = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&accept-language=zh`);
-      const cityData = await cityRes.json();
-      city = cityData.address?.city || cityData.address?.county || city || DEFAULT_LOCATION.city;
-      province = cityData.address?.state || province || DEFAULT_LOCATION.province;
-    } catch {
-      city = city || DEFAULT_LOCATION.city;
-      province = province || DEFAULT_LOCATION.province;
+    if (cityResult.status === 'fulfilled') {
+      const cityData = cityResult.value;
+      city = cityData.address?.city || cityData.address?.county || city;
+      province = cityData.address?.state || province;
     }
 
+    const wmo = parseWMO(current.weather_code);
     const forecast = (data.daily?.time || []).map((t, i) => ({
       date: t,
       wmo: parseWMO(data.daily.weather_code[i]),
@@ -96,15 +168,10 @@ export async function getWeather() {
       forecast,
     };
     _cacheTime = Date.now();
+    writeStorageCache(_cache, _cacheTime);
     return _cache;
   } catch {
-    return {
-      icon: '🌤️',
-      text: '天气获取失败',
-      temp: 0,
-      city: DEFAULT_LOCATION.city,
-      province: DEFAULT_LOCATION.province,
-      forecast: [],
-    };
+    if (storageCache?.data) return storageCache.data;
+    return buildFallback();
   }
 }

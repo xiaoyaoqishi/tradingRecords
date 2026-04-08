@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Input, Modal, Popconfirm, message } from 'antd';
-import { SearchOutlined, PlusOutlined, DeleteOutlined, FolderOutlined, FolderAddOutlined, FileTextOutlined, FileAddOutlined } from '@ant-design/icons';
+import { Input, Modal, Popconfirm, Select, message } from 'antd';
+import { SearchOutlined, PlusOutlined, DeleteOutlined, FolderOutlined, FolderAddOutlined, FileTextOutlined, FileAddOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
 import { noteApi, notebookApi } from '../api';
 import NoteEditor from './NoteEditor';
 import dayjs from 'dayjs';
 
-function FolderNode({ nb, allNotebooks, notesByNb, activeNote, expandedFolders, onToggle, onSelectNote, onDeleteNote, onDeleteFolder, onCreateDoc, onCreateSubfolder }) {
+function FolderNode({ nb, allNotebooks, notesByNb, activeNote, expandedFolders, onToggle, onSelectNote, onDeleteNote, onDeleteFolder, onCreateDoc, onCreateSubfolder, onCopyNote, onMoveNote }) {
   const children = allNotebooks.filter(c => c.parent_id === nb.id);
   const notes = notesByNb[nb.id] || [];
   const isExpanded = expandedFolders[nb.id];
@@ -55,6 +55,8 @@ function FolderNode({ nb, allNotebooks, notesByNb, activeNote, expandedFolders, 
               onDeleteFolder={onDeleteFolder}
               onCreateDoc={onCreateDoc}
               onCreateSubfolder={onCreateSubfolder}
+              onCopyNote={onCopyNote}
+              onMoveNote={onMoveNote}
             />
           ))}
           {notes.map(note => (
@@ -64,15 +66,27 @@ function FolderNode({ nb, allNotebooks, notesByNb, activeNote, expandedFolders, 
               onClick={() => onSelectNote(note)}
             >
               <span><FileTextOutlined /> {note.title || '无标题'}</span>
-              <Popconfirm
-                title="确定删除？"
-                onConfirm={(e) => { e?.stopPropagation(); onDeleteNote(note.id); }}
-              >
-                <DeleteOutlined
-                  className="tree-delete"
-                  onClick={e => e.stopPropagation()}
+              <span className="tree-file-actions" onClick={e => e.stopPropagation()}>
+                <CopyOutlined
+                  className="tree-action-icon"
+                  title="复制到其他文件夹"
+                  onClick={() => onCopyNote(note)}
                 />
-              </Popconfirm>
+                <SwapOutlined
+                  className="tree-action-icon"
+                  title="移动到其他文件夹"
+                  onClick={() => onMoveNote(note)}
+                />
+                <Popconfirm
+                  title="确定删除？"
+                  onConfirm={(e) => { e?.stopPropagation(); onDeleteNote(note.id); }}
+                >
+                  <DeleteOutlined
+                    className="tree-action-icon danger"
+                    onClick={e => e.stopPropagation()}
+                  />
+                </Popconfirm>
+              </span>
             </div>
           ))}
         </div>
@@ -89,6 +103,10 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
   const [newFolderName, setNewFolderName] = useState('');
   const [parentForNewFolder, setParentForNewFolder] = useState(null);
   const [expandedFolders, setExpandedFolders] = useState({});
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferMode, setTransferMode] = useState('copy');
+  const [transferNote, setTransferNote] = useState(null);
+  const [transferTargetNb, setTransferTargetNb] = useState(null);
   const saveTimer = useRef(null);
 
   const loadNotes = useCallback(async () => {
@@ -136,7 +154,7 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
       setAddOpen(false);
       setParentForNewFolder(null);
       onReloadNotebooks();
-    } catch { message.error('创建失败'); }
+    } catch (e) { message.error(e.response?.data?.detail || '创建失败'); }
   };
 
   const openCreateSubfolder = (parentId) => {
@@ -187,6 +205,41 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
     setExpandedFolders(prev => ({ ...prev, [nbId]: !prev[nbId] }));
   };
 
+  const openTransfer = (note, mode) => {
+    setTransferNote(note);
+    setTransferMode(mode);
+    setTransferTargetNb(note.notebook_id);
+    setTransferOpen(true);
+  };
+
+  const handleSubmitTransfer = async () => {
+    if (!transferNote || !transferTargetNb) { message.warning('请选择目标文件夹'); return; }
+    try {
+      if (transferMode === 'copy') {
+        const created = await noteApi.create({
+          notebook_id: transferTargetNb,
+          title: transferNote.title || '无标题',
+          content: transferNote.content || '',
+          note_type: 'doc',
+          word_count: transferNote.word_count || 0,
+        });
+        setActiveNote(created.data);
+        message.success('复制成功');
+      } else {
+        const updated = await noteApi.update(transferNote.id, {
+          notebook_id: transferTargetNb,
+        });
+        if (activeNote?.id === transferNote.id) setActiveNote(updated.data);
+        message.success('移动成功');
+      }
+      setTransferOpen(false);
+      setTransferNote(null);
+      loadNotes();
+    } catch (e) {
+      message.error(e.response?.data?.detail || '操作失败');
+    }
+  };
+
   const notesByNb = {};
   for (const note of notes) {
     if (!notesByNb[note.notebook_id]) notesByNb[note.notebook_id] = [];
@@ -194,6 +247,14 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
   }
 
   const rootNotebooks = notebooks.filter(nb => !nb.parent_id);
+  const buildNotebookOptions = (parentId = null, depth = 0) => {
+    const children = notebooks.filter(n => (n.parent_id || null) === parentId);
+    return children.flatMap((n) => ([
+      { value: n.id, label: `${'  '.repeat(depth)}${n.icon || '📁'} ${n.name}` },
+      ...buildNotebookOptions(n.id, depth + 1),
+    ]));
+  };
+  const notebookOptions = buildNotebookOptions();
 
   return (
     <div className="view-container">
@@ -237,6 +298,8 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
               onDeleteFolder={handleDeleteFolder}
               onCreateDoc={handleCreateDoc}
               onCreateSubfolder={openCreateSubfolder}
+              onCopyNote={(note) => openTransfer(note, 'copy')}
+              onMoveNote={(note) => openTransfer(note, 'move')}
             />
           ))}
 
@@ -274,6 +337,26 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
           value={newFolderName}
           onChange={e => setNewFolderName(e.target.value)}
           onPressEnter={handleCreateFolder}
+        />
+      </Modal>
+
+      <Modal
+        title={transferMode === 'copy' ? '复制文档到文件夹' : '移动文档到文件夹'}
+        open={transferOpen}
+        onOk={handleSubmitTransfer}
+        onCancel={() => { setTransferOpen(false); setTransferNote(null); }}
+        okText={transferMode === 'copy' ? '复制' : '移动'}
+        cancelText="取消"
+      >
+        <div style={{ marginBottom: 10, color: '#666', fontSize: 13 }}>
+          文档：{transferNote?.title || '无标题'}
+        </div>
+        <Select
+          style={{ width: '100%' }}
+          placeholder="请选择目标文件夹"
+          value={transferTargetNb}
+          onChange={setTransferTargetNb}
+          options={notebookOptions}
         />
       </Modal>
     </div>
