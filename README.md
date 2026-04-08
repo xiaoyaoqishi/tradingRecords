@@ -61,8 +61,11 @@
 
 **子模块 B：今日新闻**
 - 聚合四类：经济、时政、AI、科技
-- 仅抓取真实来源 RSS（如 Reuters、BBC、TechCrunch、The Verge 等）
-- 每条新闻必须包含来源与原文链接，禁止杜撰
+- 中文优先来源聚合（Google News 中文 RSS）
+- 左侧今日新闻文件夹逐条展示，默认选中第一条
+- 右侧展示新闻详情，顶部标注来源与发布时间
+- 支持服务端抓取原文正文（失败时回退摘要）
+- 支持左右面板拖动分割线
 
 ### 交易记录系统（/trading/）
 
@@ -91,19 +94,25 @@
 - 知识笔记统计概览（日记/文档数量、总字数）
 - 最近文档快速访问
 - 日历备忘（含天气）
-- 历史上的今天（往年同日日记）
+- 稍后待办只读看板（仅显示未完成项）
 
 **日记 Tab**：
 - 自定义迷你日历（中文月份，有日记的日期橙色圆点标记）
-- 标签分类筛选（全部日记、工作笔记、生活杂记、心情随笔）
 - 「写今天的日记」按钮，自动生成标题：`天气图标 + 日期 + 星期 + 时间`
 - 日期树形结构浏览（年 > 月 > 日）
+- 点击年/月可查看当年/当月“日记梗概列表”（每行：日期 + 梗概）
 - 右侧富文本编辑器
 
 **文档 Tab**：
 - 支持 **多级嵌套文件夹**（文件夹下可建子文件夹）
 - 悬停显示操作按钮（新建文档、新建子文件夹、删除）
+- 文档可复制/移动到其他文件夹
 - 文件夹树 + 右侧编辑器
+
+**待办 Tab**：
+- 与日记/文档同级的独立子模块
+- 新增、编辑、删除、完成状态、优先级管理
+- 支持批量勾选后批量完成/批量设为未完成
 
 **富文本编辑器（TipTap）**：
 - **字体选择**：宋体、黑体、楷体、仿宋、华文楷体、Arial、Georgia、Courier
@@ -124,6 +133,8 @@
 - 切换页面后默认阅读模式
 - 粘贴 Markdown 文本自动转换为富文本
 - **设置功能**：可自定义默认字体和字号（localStorage 持久化）
+- 默认字体：华文楷体；默认字号：20px
+- 日记/文档编辑模式支持“选中文本 → 加入稍后待办”
 - 自动保存（800ms 防抖 + 离开页面即时保存）
 - **内容存储格式**：TipTap JSON（无损往返，解决混合内容代码块编辑问题），向下兼容旧 HTML 格式
 
@@ -168,7 +179,7 @@ program/
 ├── backend/                         # FastAPI 后端
 │   ├── requirements.txt             # fastapi, uvicorn, sqlalchemy, pydantic, python-multipart, psutil
 │   ├── database.py                  # 数据库连接与会话
-│   ├── models.py                    # ORM 模型 (Trade, Review, Notebook, Note)
+│   ├── models.py                    # ORM 模型 (Trade, Review, Notebook, Note, TodoItem, NewsIssue)
 │   ├── schemas.py                   # Pydantic 请求/响应模型
 │   ├── auth.py                      # HMAC 签名会话认证
 │   ├── main.py                      # 应用入口、中间件、全部 API 路由 + 监控采集线程
@@ -199,11 +210,12 @@ program/
 │       ├── utils/
 │       │   └── weather.js           # 天气 API 封装（Open-Meteo + 地理定位）
 │       └── components/
-│           ├── IconSidebar.jsx      # 左侧图标导航栏（首页/日记/文档/设置）
+│           ├── IconSidebar.jsx      # 左侧图标导航栏（首页/日记/文档/待办/设置）
 │           ├── SettingsModal.jsx   # 编辑器设置弹窗（默认字体/字号）
-│           ├── HomePage.jsx         # 首页（公历农历 + 天气 + 统计 + 历史）
-│           ├── DiaryView.jsx        # 日记（迷你日历 + 标签 + 日期树 + 编辑器）
-│           ├── DocView.jsx          # 文档（嵌套文件夹树 + 编辑器）
+│           ├── HomePage.jsx         # 首页（公历农历 + 天气 + 统计 + 待办看板）
+│           ├── DiaryView.jsx        # 日记（迷你日历 + 日期树 + 年月梗概 + 编辑器）
+│           ├── DocView.jsx          # 文档（嵌套文件夹树 + 复制/移动 + 编辑器）
+│           ├── TodoView.jsx         # 待办管理（增删改查 + 批量操作）
 │           ├── MiniCalendar.jsx     # 自定义迷你日历组件（中文）
 │           ├── NoteEditor.jsx       # TipTap 富文本编辑器（字体/字号/颜色/表格/图片上传...）
 │           └── ResizableImage.jsx   # 可调大小图片扩展（TipTap NodeView）
@@ -384,7 +396,17 @@ curl -X POST http://127.0.0.1:8000/api/auth/setup \
 | GET | `/api/notes/stats` | 统计（日记/文档数量、字数、最近文档） |
 | GET | `/api/notes/calendar` | 日历数据（某月有日记的日期列表） |
 | GET | `/api/notes/diary-tree` | 日记日期树（年 > 月 > 日结构） |
+| GET | `/api/notes/diary-summaries` | 日记梗概（按年/按月） |
 | GET | `/api/notes/history-today` | 历史上的今天（往年同日日记） |
+
+### 稍后待办
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/todos` | 列表（支持 include_completed） |
+| POST | `/api/todos` | 创建 |
+| PUT | `/api/todos/{id}` | 更新（内容/完成状态/优先级） |
+| DELETE | `/api/todos/{id}` | 删除 |
 
 ### 新闻实事
 
@@ -396,6 +418,7 @@ curl -X POST http://127.0.0.1:8000/api/auth/setup \
 | POST | `/api/news/issues/{id}/translate` | 翻译当前期 |
 | GET | `/api/news/issues/{id}/progress` | 翻译进度 |
 | GET | `/api/news/today` | 今日新闻聚合（经济/时政/AI/科技，含来源链接） |
+| GET | `/api/news/article-content` | 抓取指定新闻链接的正文内容 |
 ### 服务器监控
 
 | 方法 | 路径 | 说明 |
