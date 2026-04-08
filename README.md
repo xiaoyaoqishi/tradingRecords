@@ -161,7 +161,8 @@
 | 云服务商 | 阿里云 ECS |
 | 系统 | Ubuntu 24.04 |
 | 开放端口 | 22 (SSH)、80 (HTTP)、443 (HTTPS)、ICMP |
-| SSH 登录 | `ssh -i ~/.ssh/xiaoyao.pem root@<服务器IP>` |
+| SSH 登录 | `ssh -i ~/.ssh/xiaoyao.pem root@8.135.147.61` |
+| 访问域名 | `https://www.tradetrack.top` |
 | 项目路径 | `/opt/tradingRecords` |
 | 进程管理 | systemd (`trading.service`) |
 
@@ -317,7 +318,7 @@ npm run dev
 cd program && git add -A && git commit -m "描述" && git push
 
 # 2. 远程一键更新
-ssh -i ~/.ssh/xiaoyao.pem root@<服务器IP> "cd /opt/tradingRecords && bash deploy/update.sh"
+ssh -i ~/.ssh/xiaoyao.pem root@8.135.147.61 "cd /opt/tradingRecords && bash deploy/update.sh"
 ```
 
 `update.sh` 自动完成：`git pull` → 安装依赖 → 构建四个前端 → 同步 Nginx/门户配置 → 重启服务。

@@ -107,6 +107,7 @@ app.add_middleware(
 
 AUTH_COOKIE = "session_token"
 AUTH_WHITELIST = {"/api/auth/login", "/api/auth/check", "/api/auth/setup"}
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "0" if DEV_MODE else "1") == "1"
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -153,7 +154,7 @@ def auth_login(body: LoginBody, response: Response):
     token = create_token(body.username)
     response.set_cookie(
         AUTH_COOKIE, token,
-        max_age=7 * 86400, httponly=True, samesite="lax", path="/",
+        max_age=7 * 86400, httponly=True, samesite="lax", path="/", secure=COOKIE_SECURE,
     )
     return {"ok": True, "username": body.username}
 
