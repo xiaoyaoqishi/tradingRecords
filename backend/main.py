@@ -819,8 +819,11 @@ def _build_poem_payload(entry: dict, source: str) -> dict:
 
 
 def _fetch_remote_poem() -> dict:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    if JINRISHICI_TOKEN:
+        headers["X-User-Token"] = JINRISHICI_TOKEN
     with httpx.Client(timeout=8) as client:
-        resp = client.get(POEM_REMOTE_URL, headers={"User-Agent": "Mozilla/5.0"})
+        resp = client.get(POEM_REMOTE_URL, headers=headers)
     resp.raise_for_status()
     raw = resp.json()
     data = raw.get("data") if isinstance(raw, dict) else {}
@@ -907,6 +910,7 @@ _poem_lock = threading.Lock()
 _poem_cache = {"updated_at": None, "payload": None}
 POEM_CACHE_TTL = int(os.environ.get("POEM_CACHE_TTL", "1800"))
 POEM_REMOTE_URL = os.environ.get("POEM_REMOTE_URL", "https://v2.jinrishici.com/sentence")
+JINRISHICI_TOKEN = os.environ.get("JINRISHICI_TOKEN", "").strip()
 POEM_FALLBACKS = [
     {
         "title": "望岳",
