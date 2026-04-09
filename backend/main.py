@@ -32,7 +32,7 @@ from bs4 import BeautifulSoup
 DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
 
 from database import engine, get_db, Base, SessionLocal
-from models import Trade, Review, Notebook, Note, TodoItem, NewsIssue
+from models import Trade, Review, Notebook, Note, NoteLink, TodoItem, NewsIssue
 from schemas import (
     TradeCreate, TradeUpdate, TradeResponse,
     ReviewCreate, ReviewUpdate, ReviewResponse,
@@ -64,6 +64,13 @@ def _migrate_legacy_schema():
             db.execute(text("ALTER TABLE notes ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
         if "deleted_at" not in note_cols:
             db.execute(text("ALTER TABLE notes ADD COLUMN deleted_at DATETIME"))
+        todo_cols = _column_names(db, "todo_items")
+        if "source_anchor_text" not in todo_cols:
+            db.execute(text("ALTER TABLE todo_items ADD COLUMN source_anchor_text TEXT"))
+        if "due_at" not in todo_cols:
+            db.execute(text("ALTER TABLE todo_items ADD COLUMN due_at DATETIME"))
+        if "reminder_at" not in todo_cols:
+            db.execute(text("ALTER TABLE todo_items ADD COLUMN reminder_at DATETIME"))
         db.commit()
     finally:
         db.close()
@@ -618,6 +625,250 @@ def _note_summary_text(content: Optional[str], title: Optional[str]) -> str:
     return text_out[:120]
 
 
+def _note_plain_text(content: Optional[str], title: Optional[str]) -> str:
+    fallback = (title or "").strip()
+    if not content:
+        return fallback
+    raw = str(content).strip()
+    if not raw:
+        return fallback
+    try:
+        obj = json.loads(raw)
+        text_out = _extract_tiptap_text(obj)
+    except Exception:
+        text_out = BeautifulSoup(raw, "html.parser").get_text(" ", strip=True)
+    text_out = re.sub(r"\s+", " ", text_out).strip()
+    return text_out or fallback
+
+
+def _make_search_snippet(text: str, keyword: str, width: int = 90) -> str:
+    if not text:
+        return ""
+    key = (keyword or "").strip().lower()
+    if not key:
+        return text[:width]
+    low = text.lower()
+    idx = low.find(key)
+    if idx < 0:
+        return text[:width]
+    start = max(0, idx - width // 2)
+    end = min(len(text), idx + len(keyword) + width // 2)
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(text) else ""
+    return f"{prefix}{text[start:end]}{suffix}"
+
+
+def _split_keywords(q: str) -> List[str]:
+    return [k for k in re.split(r"\s+", (q or "").strip().lower()) if k]
+
+
+def _search_rank(title: str, plain: str, keys: List[str]) -> int:
+    if not keys:
+        return 0
+    t = (title or "").lower()
+    p = (plain or "").lower()
+    score = 0
+    for k in keys:
+        if k in t:
+            score += 8
+        if k in p:
+            score += 3
+        if t.startswith(k):
+            score += 2
+    if all(k in t for k in keys):
+        score += 6
+    if all(k in p for k in keys):
+        score += 2
+    return score
+
+
+def _parse_note_wikilinks(text: str) -> List[tuple[str, Optional[str]]]:
+    out = []
+    seen = set()
+    for m in re.finditer(r"\[\[([^\[\]\n]{1,220})\]\]", text or ""):
+        raw = (m.group(1) or "").strip()
+        if not raw:
+            continue
+        name, heading = (raw.split("#", 1) + [None])[:2]
+        name = (name or "").strip()
+        heading = (heading or "").strip() or None
+        if not name:
+            continue
+        key = (name.lower(), (heading or "").lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((name, heading))
+    return out
+
+
+def _resolve_link_target_id(db: Session, target_name: str) -> Optional[int]:
+    name = (target_name or "").strip()
+    if not name:
+        return None
+    note = (
+        db.query(Note)
+        .filter(
+            Note.title == name,
+            Note.note_type == "doc",
+            Note.is_deleted == False,  # noqa: E712
+        )
+        .order_by(Note.updated_at.desc())
+        .first()
+    )
+    if note:
+        return note.id
+    note = (
+        db.query(Note)
+        .filter(
+            Note.title == name,
+            Note.is_deleted == False,  # noqa: E712
+        )
+        .order_by(Note.updated_at.desc())
+        .first()
+    )
+    return note.id if note else None
+
+
+def _index_note_links(db: Session, note: Note):
+    db.query(NoteLink).filter(NoteLink.source_note_id == note.id).delete(synchronize_session=False)
+    plain = _note_plain_text(note.content, note.title)
+    for name, heading in _parse_note_wikilinks(plain):
+        db.add(NoteLink(
+            source_note_id=note.id,
+            target_note_id=_resolve_link_target_id(db, name),
+            target_name=name,
+            target_heading=heading,
+        ))
+
+
+def _refresh_link_targets(db: Session):
+    links = db.query(NoteLink).all()
+    for lk in links:
+        lk.target_note_id = _resolve_link_target_id(db, lk.target_name)
+
+
+def _index_links_for_existing_notes():
+    db = SessionLocal()
+    try:
+        notes = db.query(Note).filter(Note.is_deleted == False).all()  # noqa: E712
+        db.query(NoteLink).delete(synchronize_session=False)
+        for n in notes:
+            _index_note_links(db, n)
+        db.commit()
+    finally:
+        db.close()
+
+
+_index_links_for_existing_notes()
+
+
+@app.get("/api/notes/search")
+def search_notes(
+    q: str = Query(..., min_length=1),
+    note_type: Optional[str] = Query(None),
+    limit: int = Query(30, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    kw = q.strip()
+    keys = _split_keywords(kw)
+    if not keys:
+        return []
+    rows = (
+        db.query(Note)
+        .filter(Note.is_deleted == False)  # noqa: E712
+        .order_by(Note.updated_at.desc())
+        .limit(500)
+        .all()
+    )
+    out = []
+    for n in rows:
+        if note_type and n.note_type != note_type:
+            continue
+        title = (n.title or "").strip()
+        plain = _note_plain_text(n.content, title)
+        t_low = title.lower()
+        p_low = plain.lower()
+        if not all((k in t_low) or (k in p_low) for k in keys):
+            continue
+        rank = _search_rank(title, plain, keys)
+        out.append({
+            "id": n.id,
+            "title": title or "无标题",
+            "note_type": n.note_type,
+            "note_date": str(n.note_date) if n.note_date else None,
+            "updated_at": str(n.updated_at) if n.updated_at else None,
+            "snippet": _make_search_snippet(plain, keys[0]),
+            "notebook_id": n.notebook_id,
+            "_rank": rank,
+            "_ts": n.updated_at.timestamp() if n.updated_at else 0,
+        })
+    out.sort(key=lambda x: (-x["_rank"], -x["_ts"], -x["id"]))
+    trimmed = out[:limit]
+    for item in trimmed:
+        item.pop("_rank", None)
+        item.pop("_ts", None)
+    return trimmed
+
+
+@app.get("/api/notes/resolve-link")
+def resolve_note_link(
+    name: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    target_name = name.strip()
+    target_id = _resolve_link_target_id(db, target_name)
+    if not target_id:
+        return {"resolved": False, "matches": []}
+    n = db.query(Note).filter(Note.id == target_id, Note.is_deleted == False).first()  # noqa: E712
+    if not n:
+        return {"resolved": False, "matches": []}
+    return {
+        "resolved": True,
+        "matches": [{
+            "id": n.id,
+            "title": n.title,
+            "note_type": n.note_type,
+            "notebook_id": n.notebook_id,
+            "updated_at": str(n.updated_at) if n.updated_at else None,
+        }],
+    }
+
+
+@app.get("/api/notes/{note_id}/backlinks")
+def note_backlinks(note_id: int, limit: int = Query(100, ge=1, le=300), db: Session = Depends(get_db)):
+    target = db.query(Note).filter(Note.id == note_id, Note.is_deleted == False).first()  # noqa: E712
+    if not target:
+        raise HTTPException(404, "Note not found")
+    rows = (
+        db.query(NoteLink, Note)
+        .join(Note, Note.id == NoteLink.source_note_id)
+        .filter(
+            NoteLink.target_note_id == note_id,
+            Note.is_deleted == False,  # noqa: E712
+        )
+        .order_by(Note.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    out = []
+    for lk, src in rows:
+        plain = _note_plain_text(src.content, src.title)
+        needle = f"[[{lk.target_name}]]"
+        if lk.target_heading:
+            needle = f"[[{lk.target_name}#{lk.target_heading}]]"
+        out.append({
+            "source_note_id": src.id,
+            "source_title": src.title or "无标题",
+            "source_note_type": src.note_type,
+            "source_updated_at": str(src.updated_at) if src.updated_at else None,
+            "snippet": _make_search_snippet(plain, needle),
+            "target_name": lk.target_name,
+            "target_heading": lk.target_heading,
+        })
+    return out
+
+
 @app.get("/api/notes/diary-summaries")
 def diary_summaries(
     year: int = Query(..., ge=1970, le=2100),
@@ -671,6 +922,9 @@ def create_note(data: NoteCreate, db: Session = Depends(get_db)):
     db.add(obj)
     db.commit()
     db.refresh(obj)
+    _index_note_links(db, obj)
+    _refresh_link_targets(db)
+    db.commit()
     return obj
 
 
@@ -687,8 +941,12 @@ def update_note(note_id: int, data: NoteUpdate, db: Session = Depends(get_db)):
     n = db.query(Note).filter(Note.id == note_id, Note.is_deleted == False).first()  # noqa: E712
     if not n:
         raise HTTPException(404, "Note not found")
+    old_title = (n.title or "").strip()
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(n, k, v)
+    _index_note_links(db, n)
+    if (n.title or "").strip() != old_title:
+        _refresh_link_targets(db)
     db.commit()
     db.refresh(n)
     return n
@@ -701,6 +959,11 @@ def delete_note(note_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Note not found")
     n.is_deleted = True
     n.deleted_at = datetime.now()
+    db.query(NoteLink).filter(NoteLink.source_note_id == note_id).delete(synchronize_session=False)
+    db.query(NoteLink).filter(NoteLink.target_note_id == note_id).update(
+        {NoteLink.target_note_id: None},
+        synchronize_session=False,
+    )
     db.commit()
     return {"ok": True}
 
@@ -723,6 +986,8 @@ def restore_note(note_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Note not found in recycle bin")
     n.is_deleted = False
     n.deleted_at = None
+    _index_note_links(db, n)
+    _refresh_link_targets(db)
     db.commit()
     db.refresh(n)
     return n
@@ -733,22 +998,52 @@ def purge_note(note_id: int, db: Session = Depends(get_db)):
     n = db.query(Note).filter(Note.id == note_id).first()
     if not n:
         raise HTTPException(404, "Note not found")
+    db.query(NoteLink).filter(NoteLink.source_note_id == note_id).delete(synchronize_session=False)
+    db.query(NoteLink).filter(NoteLink.target_note_id == note_id).delete(synchronize_session=False)
     db.delete(n)
     db.commit()
     return {"ok": True}
 
 
+@app.delete("/api/recycle/notes/clear")
+def clear_recycle_notes(
+    note_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Note).filter(Note.is_deleted == True)  # noqa: E712
+    if note_type:
+        q = q.filter(Note.note_type == note_type)
+    rows = q.all()
+    if not rows:
+        return {"ok": True, "deleted": 0}
+    ids = [n.id for n in rows]
+    db.query(NoteLink).filter(NoteLink.source_note_id.in_(ids)).delete(synchronize_session=False)
+    db.query(NoteLink).filter(NoteLink.target_note_id.in_(ids)).delete(synchronize_session=False)
+    db.query(Note).filter(Note.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True, "deleted": len(ids)}
+
+
 @app.get("/api/todos", response_model=List[TodoResponse])
 def list_todos(
     include_completed: bool = Query(True),
+    keyword: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     q = db.query(TodoItem)
     if not include_completed:
         q = q.filter(TodoItem.is_completed == False)  # noqa: E712
+    if keyword and keyword.strip():
+        q = q.filter(TodoItem.content.contains(keyword.strip()))
     items = q.order_by(TodoItem.is_completed.asc(), TodoItem.created_at.desc()).all()
     priority_rank = {"high": 0, "medium": 1, "low": 2}
-    items.sort(key=lambda x: (1 if x.is_completed else 0, priority_rank.get(x.priority, 1), -(x.created_at.timestamp() if x.created_at else 0)))
+    items.sort(key=lambda x: (
+        1 if x.is_completed else 0,
+        0 if x.due_at else 1,
+        x.due_at.timestamp() if x.due_at else 0,
+        priority_rank.get(x.priority, 1),
+        -(x.created_at.timestamp() if x.created_at else 0),
+    ))
     return items
 
 
@@ -762,11 +1057,16 @@ def create_todo(data: TodoCreate, db: Session = Depends(get_db)):
         src = db.query(Note).filter(Note.id == data.source_note_id).first()
         if not src:
             raise HTTPException(404, "source_note_id 对应日记不存在")
+    if data.due_at and data.reminder_at and data.reminder_at > data.due_at:
+        raise HTTPException(400, "提醒时间不能晚于截止时间")
     obj = TodoItem(
         content=content,
         priority=priority,
         is_completed=False,
         source_note_id=data.source_note_id,
+        source_anchor_text=(data.source_anchor_text or "").strip() or None,
+        due_at=data.due_at,
+        reminder_at=data.reminder_at,
     )
     db.add(obj)
     db.commit()
@@ -786,6 +1086,12 @@ def update_todo(todo_id: int, data: TodoUpdate, db: Session = Depends(get_db)):
             raise HTTPException(400, "待办内容不能为空")
     if "priority" in updates:
         updates["priority"] = _normalize_todo_priority(updates["priority"])
+    if "source_anchor_text" in updates:
+        updates["source_anchor_text"] = (updates["source_anchor_text"] or "").strip() or None
+    due_at = updates.get("due_at", obj.due_at)
+    reminder_at = updates.get("reminder_at", obj.reminder_at)
+    if due_at and reminder_at and reminder_at > due_at:
+        raise HTTPException(400, "提醒时间不能晚于截止时间")
     for k, v in updates.items():
         setattr(obj, k, v)
     db.commit()

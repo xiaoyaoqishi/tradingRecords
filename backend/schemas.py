@@ -271,12 +271,18 @@ class TodoCreate(BaseModel):
     content: str
     priority: Optional[str] = "medium"
     source_note_id: Optional[int] = None
+    source_anchor_text: Optional[str] = None
+    due_at: Optional[datetime] = None
+    reminder_at: Optional[datetime] = None
 
 
 class TodoUpdate(BaseModel):
     content: Optional[str] = None
     is_completed: Optional[bool] = None
     priority: Optional[str] = None
+    source_anchor_text: Optional[str] = None
+    due_at: Optional[datetime] = None
+    reminder_at: Optional[datetime] = None
 
 
 class TodoResponse(BaseModel):
@@ -285,6 +291,9 @@ class TodoResponse(BaseModel):
     is_completed: bool
     priority: str
     source_note_id: Optional[int] = None
+    source_anchor_text: Optional[str] = None
+    due_at: Optional[datetime] = None
+    reminder_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

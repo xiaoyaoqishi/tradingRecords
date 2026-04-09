@@ -1,18 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
-import { message } from 'antd';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { DatePicker, message } from 'antd';
 import dayjs from 'dayjs';
-import { todoApi } from '../api';
+import { noteApi, todoApi } from '../api';
 
-export default function TodoView() {
+const REMINDER_KEY = 'todo-reminded-ids';
+
+function toBackendDatetime(v) {
+  if (!v) return null;
+  const d = dayjs(v);
+  return d.isValid() ? d.format('YYYY-MM-DDTHH:mm:ss') : null;
+}
+
+export default function TodoView({ onNavigate, initialAction }) {
   const [todos, setTodos] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [newTodo, setNewTodo] = useState('');
+  const [newDueAt, setNewDueAt] = useState(null);
+  const [newReminderAt, setNewReminderAt] = useState(null);
+  const [keyword, setKeyword] = useState('');
   const [showCompleted, setShowCompleted] = useState(true);
   const [selectedIds, setSelectedIds] = useState([]);
+  const createInputRef = useRef(null);
 
   const loadTodos = async () => {
     try {
-      const res = await todoApi.list({ include_completed: true });
+      const params = { include_completed: true };
+      if (keyword.trim()) params.keyword = keyword.trim();
+      const res = await todoApi.list(params);
       const list = res.data || [];
       setTodos(list);
       const nextDrafts = {};
@@ -26,7 +40,45 @@ export default function TodoView() {
 
   useEffect(() => {
     loadTodos();
-  }, []);
+  }, [keyword]);
+
+  useEffect(() => {
+    if (typeof initialAction === 'string' && initialAction.startsWith('new:')) {
+      setTimeout(() => {
+        createInputRef.current?.focus();
+      }, 0);
+    }
+  }, [initialAction]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = dayjs();
+      let reminded = [];
+      try {
+        reminded = JSON.parse(localStorage.getItem(REMINDER_KEY) || '[]');
+      } catch {
+        reminded = [];
+      }
+      const remindedSet = new Set(reminded);
+      let touched = false;
+      for (const t of todos) {
+        if (t.is_completed || !t.reminder_at) continue;
+        const due = dayjs(t.reminder_at);
+        if (!due.isValid()) continue;
+        if (due.isBefore(now) || due.isSame(now)) {
+          if (!remindedSet.has(t.id)) {
+            message.info(`待办提醒：${t.content}`);
+            remindedSet.add(t.id);
+            touched = true;
+          }
+        }
+      }
+      if (touched) {
+        localStorage.setItem(REMINDER_KEY, JSON.stringify(Array.from(remindedSet)));
+      }
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [todos]);
 
   const visibleTodos = useMemo(() => {
     if (showCompleted) return todos;
@@ -37,8 +89,15 @@ export default function TodoView() {
     const content = newTodo.trim();
     if (!content) return;
     try {
-      await todoApi.create({ content, priority: 'medium' });
+      await todoApi.create({
+        content,
+        priority: 'medium',
+        due_at: toBackendDatetime(newDueAt),
+        reminder_at: toBackendDatetime(newReminderAt),
+      });
       setNewTodo('');
+      setNewDueAt(null);
+      setNewReminderAt(null);
       loadTodos();
     } catch (e) {
       message.error(e.response?.data?.detail || '创建失败');
@@ -60,6 +119,21 @@ export default function TodoView() {
       loadTodos();
     } catch {
       message.error('删除失败');
+    }
+  };
+
+  const jumpToSource = async (todo) => {
+    if (!todo?.source_note_id) {
+      message.warning('该待办没有来源');
+      return;
+    }
+    try {
+      const res = await noteApi.get(todo.source_note_id);
+      const n = res.data;
+      const tab = n.note_type === 'diary' ? 'diary' : 'doc';
+      onNavigate?.(tab, { id: n.id, anchor: todo.source_anchor_text || '' });
+    } catch {
+      message.error('来源笔记不存在或已删除');
     }
   };
 
@@ -101,6 +175,16 @@ export default function TodoView() {
         <div className="side-search">
           <input
             className="todo-input"
+            placeholder="搜索待办..."
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+          />
+        </div>
+
+        <div className="side-search">
+          <input
+            ref={createInputRef}
+            className="todo-input"
             placeholder="输入待办事项，回车创建"
             value={newTodo}
             onChange={(e) => setNewTodo(e.target.value)}
@@ -108,6 +192,28 @@ export default function TodoView() {
               if (e.key === 'Enter') createTodo();
             }}
           />
+          <div className="todo-date-grid">
+            <label>截止</label>
+            <DatePicker
+              className="todo-datetime-picker"
+              popupClassName="todo-time-picker-popup"
+              showTime
+              format="YYYY-MM-DD HH:mm"
+              value={newDueAt}
+              onChange={(v) => setNewDueAt(v)}
+              placeholder="选择截止时间"
+            />
+            <label>提醒</label>
+            <DatePicker
+              className="todo-datetime-picker"
+              popupClassName="todo-time-picker-popup"
+              showTime
+              format="YYYY-MM-DD HH:mm"
+              value={newReminderAt}
+              onChange={(v) => setNewReminderAt(v)}
+              placeholder="选择提醒时间"
+            />
+          </div>
         </div>
 
         <div className="doc-actions">
@@ -175,7 +281,29 @@ export default function TodoView() {
                     <option value="low">低优先级</option>
                   </select>
                   <span className="todo-priority-text">添加于 {dayjs(t.created_at).format('YYYY-MM-DD HH:mm:ss')}</span>
+                  <button className="todo-del-btn" onClick={() => jumpToSource(t)}>回跳来源</button>
                   <button className="todo-del-btn" onClick={() => deleteTodo(t.id)}>删除</button>
+                </div>
+
+                <div className="todo-row todo-date-row">
+                  <span className="todo-date-label">截止</span>
+                  <DatePicker
+                    className="todo-datetime-picker row"
+                    popupClassName="todo-time-picker-popup"
+                    showTime
+                    format="YYYY-MM-DD HH:mm"
+                    value={t.due_at ? dayjs(t.due_at) : null}
+                    onChange={(v) => updateTodo(t.id, { due_at: toBackendDatetime(v) })}
+                  />
+                  <span className="todo-date-label">提醒</span>
+                  <DatePicker
+                    className="todo-datetime-picker row"
+                    popupClassName="todo-time-picker-popup"
+                    showTime
+                    format="YYYY-MM-DD HH:mm"
+                    value={t.reminder_at ? dayjs(t.reminder_at) : null}
+                    onChange={(v) => updateTodo(t.id, { reminder_at: toBackendDatetime(v) })}
+                  />
                 </div>
               </div>
             )) : <div className="empty-hint">暂无待办事项</div>}

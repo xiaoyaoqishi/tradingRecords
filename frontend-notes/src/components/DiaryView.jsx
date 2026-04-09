@@ -7,17 +7,31 @@ import NoteEditor from './NoteEditor';
 import MiniCalendar from './MiniCalendar';
 import dayjs from 'dayjs';
 
-export default function DiaryView({ initialNoteId, notebooks }) {
+export default function DiaryView({ initialNoteId, initialAnchor, notebooks }) {
+  const HISTORY_KEY = 'notes-diary-search-history';
   const [activeNote, setActiveNote] = useState(null);
   const [tree, setTree] = useState({});
   const [expandedYears, setExpandedYears] = useState({});
   const [expandedMonths, setExpandedMonths] = useState({});
   const [keyword, setKeyword] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchHistory, setSearchHistory] = useState(() => {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.slice(0, 3) : [];
+    } catch {
+      return [];
+    }
+  });
   const [calendarDates, setCalendarDates] = useState([]);
   const [selectedDate, setSelectedDate] = useState(dayjs());
   const [summaryTitle, setSummaryTitle] = useState('');
   const [summaries, setSummaries] = useState([]);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [jumpAnchor, setJumpAnchor] = useState(initialAnchor || '');
+  const [todayTemplate, setTodayTemplate] = useState('');
   const saveTimer = useRef(null);
   const creatingToday = useRef(false);
 
@@ -46,16 +60,58 @@ export default function DiaryView({ initialNoteId, notebooks }) {
 
   useEffect(() => { loadTree(); }, [loadTree]);
   useEffect(() => { loadCalendar(selectedDate); }, [selectedDate, loadCalendar]);
+  useEffect(() => {
+    const kw = keyword.trim();
+    if (!kw) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        setSearchLoading(true);
+        const res = await noteApi.search({ q: kw, note_type: 'diary', limit: 80 });
+        setSearchResults(res.data || []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [keyword]);
 
   useEffect(() => {
     if (initialNoteId === 'today') {
       handleWriteToday();
+    } else if (typeof initialNoteId === 'string' && initialNoteId.startsWith('today:')) {
+      const key = initialNoteId.split(':')[1] || '';
+      setTodayTemplate(key);
+      setTimeout(() => handleWriteToday(key), 0);
     } else if (initialNoteId && typeof initialNoteId === 'number') {
       noteApi.get(initialNoteId).then(r => setActiveNote(r.data)).catch(() => {});
     }
   }, [initialNoteId]);
 
-  const handleWriteToday = async () => {
+  useEffect(() => {
+    setJumpAnchor(initialAnchor || '');
+  }, [initialAnchor, initialNoteId]);
+
+  const buildDiaryTemplate = (key) => {
+    const now = dayjs().format('HH:mm');
+    const blocks = {
+      morning: [`晨间计划（${now}）`, '今天最重要的一件事：', '最小可执行动作：', '可能阻碍与应对：'],
+      review: ['交易复盘', '今日执行亮点：', '今日最大偏差：', '明日改进动作：'],
+      mood: ['情绪记录', '当前情绪：', '触发事件：', '身体感受：', '自我调节动作：'],
+    };
+    const lines = blocks[key] || ['新的日记'];
+    return {
+      type: 'doc',
+      content: lines.map((t) => ({ type: 'paragraph', content: [{ type: 'text', text: t }] })),
+    };
+  };
+
+  const handleWriteToday = async (templateKey) => {
     if (creatingToday.current) return;
     creatingToday.current = true;
     const todayStr = dayjs().format('YYYY-MM-DD');
@@ -63,6 +119,7 @@ export default function DiaryView({ initialNoteId, notebooks }) {
       const res = await noteApi.list({ note_type: 'diary', note_date: todayStr });
       if (res.data.length > 0) {
         setActiveNote(res.data[0]);
+        setJumpAnchor('');
         setSummaryTitle('');
         setSummaries([]);
       } else {
@@ -79,18 +136,22 @@ export default function DiaryView({ initialNoteId, notebooks }) {
         const newNote = await noteApi.create({
           notebook_id: nb.id,
           title,
-          content: '',
+          content: (templateKey || todayTemplate) ? JSON.stringify(buildDiaryTemplate(templateKey || todayTemplate)) : '',
           note_type: 'diary',
           note_date: todayStr,
         });
         setActiveNote(newNote.data);
+        setJumpAnchor('');
         setSummaryTitle('');
         setSummaries([]);
         loadTree();
         loadCalendar(selectedDate);
       }
     } catch { message.error('创建日记失败'); }
-    finally { creatingToday.current = false; }
+    finally {
+      creatingToday.current = false;
+      setTodayTemplate('');
+    }
   };
 
   const handleSelectDate = async (date) => {
@@ -100,6 +161,7 @@ export default function DiaryView({ initialNoteId, notebooks }) {
       const res = await noteApi.list({ note_type: 'diary', note_date: dateStr });
       if (res.data.length > 0) {
         setActiveNote(res.data[0]);
+        setJumpAnchor('');
         setSummaryTitle('');
         setSummaries([]);
       } else {
@@ -112,9 +174,63 @@ export default function DiaryView({ initialNoteId, notebooks }) {
     try {
       const res = await noteApi.get(noteId);
       setActiveNote(res.data);
+      setJumpAnchor('');
       setSummaryTitle('');
       setSummaries([]);
     } catch {}
+  };
+
+  const saveHistory = (list) => {
+    setSearchHistory(list);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch {}
+  };
+
+  const pushHistory = (term) => {
+    const t = String(term || '').trim();
+    if (!t) return;
+    const next = [t, ...searchHistory.filter(x => x !== t)].slice(0, 3);
+    saveHistory(next);
+  };
+
+  const removeHistory = (term) => {
+    saveHistory(searchHistory.filter(x => x !== term));
+  };
+
+  const openSearchResult = async (item) => {
+    if (!item) return;
+    if (item.note_date) {
+      const d = dayjs(item.note_date);
+      if (d.isValid()) {
+        const yearLabel = `${d.year()}年`;
+        const monthLabel = `${d.month() + 1}月`;
+        setExpandedYears(prev => ({ ...prev, [yearLabel]: true }));
+        setExpandedMonths(prev => ({ ...prev, [`${yearLabel}-${monthLabel}`]: true }));
+        setSelectedDate(d);
+      }
+    }
+    pushHistory(keyword);
+    await handleSelectTreeNote(item.id);
+  };
+
+  const renderHighlighted = (text, kw) => {
+    const source = String(text || '');
+    const key = String(kw || '').trim();
+    if (!key) return source;
+    const low = source.toLowerCase();
+    const k = key.toLowerCase();
+    const parts = [];
+    let i = 0;
+    while (i < source.length) {
+      const idx = low.indexOf(k, i);
+      if (idx < 0) {
+        parts.push(source.slice(i));
+        break;
+      }
+      if (idx > i) parts.push(source.slice(i, idx));
+      parts.push(<mark key={`${idx}-${k}`}>{source.slice(idx, idx + key.length)}</mark>);
+      i = idx + key.length;
+    }
+    return parts;
   };
 
   const loadSummary = async (year, month = null, title = '') => {
@@ -191,9 +307,22 @@ export default function DiaryView({ initialNoteId, notebooks }) {
             size="small"
             value={keyword}
             onChange={e => setKeyword(e.target.value)}
+            onPressEnter={() => {
+              if (keyword.trim() && searchResults[0]) openSearchResult(searchResults[0]);
+            }}
             allowClear
           />
         </div>
+        {!keyword.trim() && searchHistory.length > 0 && (
+          <div className="search-history">
+            {searchHistory.map(item => (
+              <div key={item} className="search-history-item">
+                <button className="search-history-text" onClick={() => setKeyword(item)}>{item}</button>
+                <button className="search-history-del" onClick={() => removeHistory(item)}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="mini-calendar-wrap">
           <MiniCalendar
@@ -208,7 +337,23 @@ export default function DiaryView({ initialNoteId, notebooks }) {
         </button>
 
         <div className="date-tree">
-          {Object.entries(tree).map(([year, months]) => (
+          {keyword.trim() ? (
+            <div className="search-result-list">
+              {searchLoading ? (
+                <div className="empty-hint">搜索中...</div>
+              ) : searchResults.length ? (
+                searchResults.map(item => (
+                  <div key={item.id} className="search-result-item" onClick={() => openSearchResult(item)}>
+                    <div className="search-result-title">{renderHighlighted(item.title, keyword)}</div>
+                    <div className="search-result-snippet">{renderHighlighted(item.snippet, keyword)}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-hint">无匹配结果</div>
+              )}
+            </div>
+          ) : null}
+          {!keyword.trim() && Object.entries(tree).map(([year, months]) => (
             <div key={year}>
               <div
                 className="tree-year"
@@ -254,6 +399,7 @@ export default function DiaryView({ initialNoteId, notebooks }) {
           <NoteEditor
             note={activeNote}
             onUpdate={handleUpdateNote}
+            jumpAnchor={jumpAnchor}
             defaultEditing={activeNote.note_date === dayjs().format('YYYY-MM-DD')}
           />
         ) : summaryTitle ? (

@@ -318,6 +318,85 @@ function renderMdBlocksInDom(container) {
   });
 }
 
+function renderWikiLinksInDom(container) {
+  if (!container) return;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  const targets = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    const parent = node.parentElement;
+    if (!parent) continue;
+    const tag = parent.tagName;
+    if (tag === 'A' || tag === 'CODE' || tag === 'PRE') continue;
+    if ((node.nodeValue || '').includes('[[') && (node.nodeValue || '').includes(']]')) {
+      targets.push(node);
+    }
+  }
+  const re = /\[\[([^\[\]\n]{1,220})\]\]/g;
+  for (const textNode of targets) {
+    const text = textNode.nodeValue || '';
+    let m;
+    let last = 0;
+    const frag = document.createDocumentFragment();
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) {
+        frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      }
+      const raw = (m[1] || '').trim();
+      const a = document.createElement('a');
+      a.href = '#';
+      a.className = 'wiki-link';
+      a.dataset.wiki = raw;
+      a.textContent = `[[${raw}]]`;
+      frag.appendChild(a);
+      last = m.index + m[0].length;
+    }
+    if (last === 0) continue;
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    textNode.parentNode?.replaceChild(frag, textNode);
+  }
+}
+
+function clearJumpHighlight(container) {
+  if (!container) return;
+  container.querySelectorAll('.anchor-jump-highlight').forEach((el) => {
+    const text = document.createTextNode(el.textContent || '');
+    el.replaceWith(text);
+  });
+}
+
+function highlightJumpAnchor(container, anchorText) {
+  if (!container || !anchorText) return false;
+  clearJumpHighlight(container);
+  const target = String(anchorText).trim();
+  if (!target) return false;
+  const key = target.toLowerCase();
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  let node;
+  while ((node = walker.nextNode())) {
+    const value = node.nodeValue || '';
+    const low = value.toLowerCase();
+    const idx = low.indexOf(key);
+    if (idx < 0) continue;
+    const before = value.slice(0, idx);
+    const hit = value.slice(idx, idx + target.length);
+    const after = value.slice(idx + target.length);
+    const frag = document.createDocumentFragment();
+    if (before) frag.appendChild(document.createTextNode(before));
+    const mark = document.createElement('mark');
+    mark.className = 'anchor-jump-highlight';
+    mark.textContent = hit;
+    frag.appendChild(mark);
+    if (after) frag.appendChild(document.createTextNode(after));
+    node.parentNode?.replaceChild(frag, node);
+    setTimeout(() => {
+      mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 20);
+    return true;
+  }
+  return false;
+}
+
 function parseContent(raw) {
   if (!raw) return '';
   if (typeof raw === 'object') return raw;
@@ -328,7 +407,7 @@ function parseContent(raw) {
   return raw;
 }
 
-export default function NoteEditor({ note, onUpdate, defaultEditing = false }) {
+export default function NoteEditor({ note, onUpdate, defaultEditing = false, onOpenWikiLink, jumpAnchor = '' }) {
   const [title, setTitle] = useState(note?.title || '');
   const [mode, setMode] = useState('read');
   const [mdSource, setMdSource] = useState('');
@@ -431,26 +510,41 @@ export default function NoteEditor({ note, onUpdate, defaultEditing = false }) {
 
   useEffect(() => {
     setTitle(note?.title || '');
-    setMode('read');
+    setMode(defaultEditing ? 'edit' : 'read');
     if (editor) {
-      editor.setEditable(false);
+      editor.setEditable(defaultEditing);
       editor.commands.setContent(parseContent(note.content));
+      if (defaultEditing) {
+        setTimeout(() => {
+          try { editor.chain().focus().run(); } catch {}
+        }, 0);
+      }
     }
-  }, [note?.id]);
+  }, [note?.id, defaultEditing, editor]);
 
   useEffect(() => {
     if (mode === 'read' && readViewRef.current) {
       const html = editor?.getHTML() || '';
       readViewRef.current.innerHTML = html;
       renderMdBlocksInDom(readViewRef.current);
+      renderWikiLinksInDom(readViewRef.current);
+      if (jumpAnchor) {
+        highlightJumpAnchor(readViewRef.current, jumpAnchor);
+      }
     }
-  }, [mode, note?.id]);
+  }, [mode, note?.id, jumpAnchor]);
 
   const handleReadViewClick = useCallback((e) => {
     if (e.target.tagName === 'IMG') {
       setLightboxSrc(e.target.src);
+      return;
     }
-  }, []);
+    const link = e.target.closest?.('.wiki-link');
+    if (link) {
+      e.preventDefault();
+      onOpenWikiLink?.(link.dataset.wiki || '');
+    }
+  }, [onOpenWikiLink]);
 
   const handleTitleChange = (e) => {
     const val = e.target.value;
@@ -482,6 +576,7 @@ export default function NoteEditor({ note, onUpdate, defaultEditing = false }) {
         content: text,
         priority: 'medium',
         source_note_id: note.id,
+        source_anchor_text: text.slice(0, 240),
       });
       message.success('已加入稍后待办');
     } catch (e) {

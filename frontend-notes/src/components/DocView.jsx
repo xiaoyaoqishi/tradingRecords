@@ -3,7 +3,6 @@ import { Input, Modal, Popconfirm, Select, message } from 'antd';
 import { SearchOutlined, PlusOutlined, DeleteOutlined, FolderOutlined, FolderAddOutlined, FileTextOutlined, FileAddOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
 import { noteApi, notebookApi } from '../api';
 import NoteEditor from './NoteEditor';
-import dayjs from 'dayjs';
 
 function FolderNode({ nb, allNotebooks, notesByNb, activeNote, expandedFolders, onToggle, onSelectNote, onDeleteNote, onDeleteFolder, onCreateDoc, onCreateSubfolder, onCopyNote, onMoveNote }) {
   const children = allNotebooks.filter(c => c.parent_id === nb.id);
@@ -95,10 +94,22 @@ function FolderNode({ nb, allNotebooks, notesByNb, activeNote, expandedFolders, 
   );
 }
 
-export default function DocView({ initialNoteId, notebooks, onReloadNotebooks }) {
+export default function DocView({ initialNoteId, initialAnchor, notebooks, onReloadNotebooks }) {
+  const HISTORY_KEY = 'notes-doc-search-history';
   const [notes, setNotes] = useState([]);
   const [activeNote, setActiveNote] = useState(null);
   const [keyword, setKeyword] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchHistory, setSearchHistory] = useState(() => {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.slice(0, 3) : [];
+    } catch {
+      return [];
+    }
+  });
   const [addOpen, setAddOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [parentForNewFolder, setParentForNewFolder] = useState(null);
@@ -107,7 +118,30 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
   const [transferMode, setTransferMode] = useState('copy');
   const [transferNote, setTransferNote] = useState(null);
   const [transferTargetNb, setTransferTargetNb] = useState(null);
+  const [backlinks, setBacklinks] = useState([]);
+  const [backlinksCollapsed, setBacklinksCollapsed] = useState(true);
+  const [backlinksWidth, setBacklinksWidth] = useState(280);
+  const [jumpAnchor, setJumpAnchor] = useState(initialAnchor || '');
+  const resizingRef = useRef(false);
   const saveTimer = useRef(null);
+  const createdFromEntryRef = useRef(false);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!resizingRef.current) return;
+      const panelMin = 220;
+      const panelMax = 520;
+      const next = Math.max(panelMin, Math.min(panelMax, window.innerWidth - e.clientX));
+      setBacklinksWidth(next);
+    };
+    const onUp = () => { resizingRef.current = false; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
 
   const loadNotes = useCallback(async () => {
     const params = { note_type: 'doc' };
@@ -121,10 +155,52 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
   useEffect(() => { loadNotes(); }, [loadNotes]);
 
   useEffect(() => {
+    const kw = keyword.trim();
+    if (!kw) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        setSearchLoading(true);
+        const res = await noteApi.search({ q: kw, note_type: 'doc', limit: 80 });
+        setSearchResults(res.data || []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [keyword]);
+
+  useEffect(() => {
+    if (typeof initialNoteId === 'string' && initialNoteId.startsWith('new:')) {
+      if (!createdFromEntryRef.current) {
+        createdFromEntryRef.current = true;
+        handleCreateDoc();
+      }
+      return;
+    }
     if (initialNoteId && typeof initialNoteId === 'number') {
+      createdFromEntryRef.current = false;
       noteApi.get(initialNoteId).then(r => setActiveNote(r.data)).catch(() => {});
     }
   }, [initialNoteId]);
+
+  useEffect(() => {
+    setJumpAnchor(initialAnchor || '');
+  }, [initialAnchor, initialNoteId]);
+
+  useEffect(() => {
+    const id = activeNote?.id;
+    if (!id) {
+      setBacklinks([]);
+      return;
+    }
+    noteApi.backlinks(id, { limit: 100 }).then(r => setBacklinks(r.data || [])).catch(() => setBacklinks([]));
+  }, [activeNote?.id]);
 
   const handleCreateDoc = async (nbId) => {
     const targetNb = nbId || notebooks.find(n => !n.parent_id)?.id;
@@ -136,7 +212,7 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
         content: '',
         note_type: 'doc',
       });
-      setActiveNote(res.data);
+      setActiveNote({ ...res.data, _justCreated: true });
       setExpandedFolders(prev => ({ ...prev, [targetNb]: true }));
       loadNotes();
     } catch { message.error('创建失败'); }
@@ -177,7 +253,10 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
     saveTimer.current = setTimeout(async () => {
       try {
         const res = await noteApi.update(id, data);
-        setActiveNote(res.data);
+        setActiveNote((prev) => {
+          if (!prev || prev.id !== res.data.id) return res.data;
+          return { ...res.data, _justCreated: prev._justCreated === true };
+        });
         loadNotes();
       } catch {}
     }, 800);
@@ -199,6 +278,86 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
       loadNotes();
       message.success('已删除');
     } catch { message.error('删除失败'); }
+  };
+
+  const saveHistory = (list) => {
+    setSearchHistory(list);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch {}
+  };
+
+  const pushHistory = (term) => {
+    const t = String(term || '').trim();
+    if (!t) return;
+    const next = [t, ...searchHistory.filter(x => x !== t)].slice(0, 3);
+    saveHistory(next);
+  };
+
+  const removeHistory = (term) => {
+    saveHistory(searchHistory.filter(x => x !== term));
+  };
+
+  const expandNotebookPath = (nbId) => {
+    const map = new Map(notebooks.map(n => [n.id, n]));
+    const next = {};
+    let cur = nbId;
+    while (cur && map.has(cur)) {
+      next[cur] = true;
+      cur = map.get(cur).parent_id;
+    }
+    setExpandedFolders(prev => ({ ...prev, ...next }));
+  };
+
+  const openSearchResult = async (item) => {
+    if (!item) return;
+    pushHistory(keyword);
+    expandNotebookPath(item.notebook_id);
+    try {
+      const res = await noteApi.get(item.id);
+      setActiveNote(res.data);
+      setJumpAnchor('');
+    } catch {}
+  };
+
+  const handleOpenWikiLink = async (raw) => {
+    const text = String(raw || '').trim();
+    if (!text) return;
+    const name = text.split('#')[0].trim();
+    if (!name) return;
+    try {
+      const res = await noteApi.resolveLink(name);
+      const row = res.data?.matches?.[0];
+      if (!row) {
+        message.warning(`未找到文档：${name}`);
+        return;
+      }
+      expandNotebookPath(row.notebook_id);
+      const noteRes = await noteApi.get(row.id);
+      setActiveNote(noteRes.data);
+      setJumpAnchor('');
+    } catch {
+      message.error('链接跳转失败');
+    }
+  };
+
+  const renderHighlighted = (text, kw) => {
+    const source = String(text || '');
+    const key = String(kw || '').trim();
+    if (!key) return source;
+    const low = source.toLowerCase();
+    const k = key.toLowerCase();
+    const parts = [];
+    let i = 0;
+    while (i < source.length) {
+      const idx = low.indexOf(k, i);
+      if (idx < 0) {
+        parts.push(source.slice(i));
+        break;
+      }
+      if (idx > i) parts.push(source.slice(i, idx));
+      parts.push(<mark key={`${idx}-${k}`}>{source.slice(idx, idx + key.length)}</mark>);
+      i = idx + key.length;
+    }
+    return parts;
   };
 
   const toggleFolder = (nbId) => {
@@ -266,9 +425,22 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
             size="small"
             value={keyword}
             onChange={e => setKeyword(e.target.value)}
+            onPressEnter={() => {
+              if (keyword.trim() && searchResults[0]) openSearchResult(searchResults[0]);
+            }}
             allowClear
           />
         </div>
+        {!keyword.trim() && searchHistory.length > 0 && (
+          <div className="search-history">
+            {searchHistory.map(item => (
+              <div key={item} className="search-history-item">
+                <button className="search-history-text" onClick={() => setKeyword(item)}>{item}</button>
+                <button className="search-history-del" onClick={() => removeHistory(item)}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="side-tags">
           <div className="side-tags-header">标签：</div>
@@ -284,7 +456,26 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
         </div>
 
         <div className="folder-tree">
-          {rootNotebooks.map(nb => (
+          {keyword.trim() ? (
+            <div className="search-result-list">
+              {searchLoading ? (
+                <div className="empty-hint">搜索中...</div>
+              ) : searchResults.length ? (
+                searchResults.map(item => (
+                  <div
+                    key={item.id}
+                    className="search-result-item"
+                    onClick={() => openSearchResult(item)}
+                  >
+                    <div className="search-result-title">{renderHighlighted(item.title, keyword)}</div>
+                    <div className="search-result-snippet">{renderHighlighted(item.snippet, keyword)}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-hint">无匹配结果</div>
+              )}
+            </div>
+          ) : rootNotebooks.map(nb => (
             <FolderNode
               key={nb.id}
               nb={nb}
@@ -303,19 +494,69 @@ export default function DocView({ initialNoteId, notebooks, onReloadNotebooks })
             />
           ))}
 
-          <div className="tree-folder add-folder" onClick={openCreateRootFolder}>
-            <PlusOutlined /> 新建文件夹
-          </div>
+          {!keyword.trim() && (
+            <div className="tree-folder add-folder" onClick={openCreateRootFolder}>
+              <PlusOutlined /> 新建文件夹
+            </div>
+          )}
         </div>
       </div>
 
       <div className="main-content">
         {activeNote ? (
-          <NoteEditor
-            note={activeNote}
-            onUpdate={handleUpdateNote}
-            defaultEditing={dayjs(activeNote.created_at).format('YYYY-MM-DD') === dayjs().format('YYYY-MM-DD')}
-          />
+          <div className="doc-main-split">
+            <div className="doc-main-editor">
+              <NoteEditor
+                note={activeNote}
+                onUpdate={handleUpdateNote}
+                onOpenWikiLink={handleOpenWikiLink}
+                jumpAnchor={jumpAnchor}
+                defaultEditing={activeNote?._justCreated === true}
+              />
+            </div>
+            {!backlinksCollapsed && (
+              <div
+                className="doc-backlinks-resizer"
+                onMouseDown={() => { resizingRef.current = true; }}
+                title="拖动调整宽度"
+              />
+            )}
+            <div
+              className={`doc-backlinks ${backlinksCollapsed ? 'collapsed' : ''}`}
+              style={backlinksCollapsed ? undefined : { width: backlinksWidth, minWidth: backlinksWidth }}
+            >
+              <button
+                className="doc-backlinks-toggle"
+                onClick={() => setBacklinksCollapsed(v => !v)}
+                title={backlinksCollapsed ? '展开反向链接' : '折叠反向链接'}
+              >
+                {backlinksCollapsed ? '◀ 反向链接' : '▶ 折叠'}
+              </button>
+              {!backlinksCollapsed && (
+                <>
+                  <div className="doc-backlinks-title">反向链接</div>
+                  {backlinks.length ? backlinks.map((b, idx) => (
+                    <div
+                      key={`${b.source_note_id}-${idx}`}
+                      className="doc-backlink-item"
+                      onClick={async () => {
+                        try {
+                          const res = await noteApi.get(b.source_note_id);
+                          expandNotebookPath(res.data.notebook_id);
+                          setActiveNote(res.data);
+                        } catch {}
+                      }}
+                    >
+                      <div className="doc-backlink-name">{b.source_title || '无标题'}</div>
+                      <div className="doc-backlink-snippet">{b.snippet || ''}</div>
+                    </div>
+                  )) : (
+                    <div className="doc-backlink-empty">暂无文档引用此篇</div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
         ) : (
           <div className="empty-editor">
             <div className="empty-icon">📄</div>

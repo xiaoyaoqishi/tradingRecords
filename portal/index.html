@@ -11,7 +11,8 @@
       font-family: 'Songti SC', 'STSong', 'Noto Serif SC', serif;
       color: #2f2c28;
       min-height: 100vh;
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
       background: radial-gradient(120% 100% at 20% 0%, #ece7dd 0%, #d8d2c4 42%, #c7c0b1 100%);
     }
 
@@ -138,6 +139,11 @@
       max-height: 7.2em;
       overflow: hidden;
       position: relative;
+    }
+    .poem .line.expanded {
+      max-height: 36vh;
+      overflow-y: auto;
+      padding-right: 6px;
     }
     .poem .line.collapsed::after {
       content: '';
@@ -370,16 +376,19 @@
     poemLine.textContent = text || '暂时没有可展示的诗词';
     document.getElementById('poemMeta').textContent = `《${title}》 · ${author} · ${source}`;
     const isLong = poemLine.textContent.length > 70 || poemLine.textContent.split('\n').length > 3;
+    poemLine.classList.remove('expanded');
     poemLine.classList.toggle('collapsed', isLong);
     poemToggle.style.display = isLong ? 'inline-block' : 'none';
     poemToggle.textContent = '展开全文';
     poemToggle.onclick = () => {
       const opened = !poemLine.classList.contains('collapsed');
       if (opened) {
+        poemLine.classList.remove('expanded');
         poemLine.classList.add('collapsed');
         poemToggle.textContent = '展开全文';
       } else {
         poemLine.classList.remove('collapsed');
+        poemLine.classList.add('expanded');
         poemToggle.textContent = '收起';
       }
     };

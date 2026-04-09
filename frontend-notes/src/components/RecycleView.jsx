@@ -51,6 +51,18 @@ export default function RecycleView({ onNavigate }) {
     }
   };
 
+  const clearAll = async () => {
+    try {
+      const params = filter === 'all' ? {} : { note_type: filter };
+      const res = await noteApi.recycleClear(params);
+      const deleted = res.data?.deleted || 0;
+      message.success(`已清空 ${deleted} 条`);
+      load();
+    } catch {
+      message.error('清空失败');
+    }
+  };
+
   return (
     <div className="view-container">
       <div className="side-panel">
@@ -64,7 +76,17 @@ export default function RecycleView({ onNavigate }) {
 
       <div className="main-content">
         <div className="todo-view-main">
-          <div className="todo-view-title">回收站</div>
+          <div className="todo-board-head">
+            <div className="todo-view-title" style={{ marginBottom: 0 }}>回收站</div>
+            <Popconfirm
+              title={filter === 'all' ? '确认清空回收站全部内容？' : `确认清空当前筛选（${filter === 'diary' ? '日记' : '文档'}）？`}
+              onConfirm={clearAll}
+              okText="清空"
+              cancelText="取消"
+            >
+              <button className="todo-del-btn">清空回收站</button>
+            </Popconfirm>
+          </div>
           <div className="todo-list">
             {items.length > 0 ? items.map((n) => (
               <div key={n.id} className="todo-item">

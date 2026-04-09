@@ -157,6 +157,19 @@ class Note(Base):
     notebook = relationship("Notebook", back_populates="notes")
 
 
+class NoteLink(Base):
+    __tablename__ = "note_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=False, index=True)
+    target_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)
+    target_name = Column(String(200), nullable=False)
+    target_heading = Column(String(200), nullable=True)
+
+
 class TodoItem(Base):
     __tablename__ = "todo_items"
 
@@ -168,6 +181,9 @@ class TodoItem(Base):
     is_completed = Column(Boolean, default=False)
     priority = Column(String(10), default="medium")
     source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
+    source_anchor_text = Column(Text, nullable=True)
+    due_at = Column(DateTime, nullable=True)
+    reminder_at = Column(DateTime, nullable=True)
 
 
 class NewsIssue(Base):
