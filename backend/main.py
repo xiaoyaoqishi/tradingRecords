@@ -32,14 +32,18 @@ from bs4 import BeautifulSoup
 DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
 
 from database import engine, get_db, Base, SessionLocal
-from models import Trade, TradeReview, TradeSourceMetadata, Review, Notebook, Note, NoteLink, TodoItem, NewsIssue, TradeBroker
+from models import (
+    Trade, TradeReview, TradeSourceMetadata, Review, ReviewTradeLink, KnowledgeItem,
+    Notebook, Note, NoteLink, TodoItem, NewsIssue, TradeBroker,
+)
 from schemas import (
     TradeCreate, TradeUpdate, TradeResponse,
     TradePasteImportRequest, TradePasteImportResponse, TradePasteImportError, TradePositionResponse,
     TradeReviewUpsert, TradeReviewResponse, TradeReviewTaxonomyResponse,
     TradeSourceMetadataUpsert, TradeSourceMetadataResponse,
     TradeBrokerCreate, TradeBrokerUpdate, TradeBrokerResponse,
-    ReviewCreate, ReviewUpdate, ReviewResponse,
+    ReviewCreate, ReviewUpdate, ReviewResponse, ReviewTradeLinksPayload, ReviewTradeLinkResponse,
+    KnowledgeItemCreate, KnowledgeItemUpdate, KnowledgeItemResponse,
     NotebookCreate, NotebookUpdate, NotebookResponse,
     NoteCreate, NoteUpdate, NoteResponse,
     TodoCreate, TodoUpdate, TodoResponse,
@@ -83,6 +87,17 @@ def _migrate_legacy_schema():
             db.execute(text("ALTER TABLE todo_items ADD COLUMN due_at DATETIME"))
         if "reminder_at" not in todo_cols:
             db.execute(text("ALTER TABLE todo_items ADD COLUMN reminder_at DATETIME"))
+        review_cols = _column_names(db, "reviews")
+        if "title" not in review_cols:
+            db.execute(text("ALTER TABLE reviews ADD COLUMN title VARCHAR(200)"))
+        if "review_scope" not in review_cols:
+            db.execute(text("ALTER TABLE reviews ADD COLUMN review_scope VARCHAR(30) DEFAULT 'periodic'"))
+        if "focus_topic" not in review_cols:
+            db.execute(text("ALTER TABLE reviews ADD COLUMN focus_topic VARCHAR(200)"))
+        if "market_regime" not in review_cols:
+            db.execute(text("ALTER TABLE reviews ADD COLUMN market_regime VARCHAR(100)"))
+        if "action_items" not in review_cols:
+            db.execute(text("ALTER TABLE reviews ADD COLUMN action_items TEXT"))
         db.commit()
     finally:
         db.close()
@@ -1084,7 +1099,124 @@ def delete_trade_broker(broker_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+# ── Knowledge ──
+
+
+@app.get("/api/knowledge-items", response_model=List[KnowledgeItemResponse])
+def list_knowledge_items(
+    category: Optional[str] = None,
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    query = db.query(KnowledgeItem)
+    if category:
+        query = query.filter(KnowledgeItem.category == category)
+    if status:
+        query = query.filter(KnowledgeItem.status == status)
+    if q and q.strip():
+        kw = q.strip()
+        query = query.filter(
+            or_(
+                KnowledgeItem.title.contains(kw),
+                KnowledgeItem.summary.contains(kw),
+                KnowledgeItem.content.contains(kw),
+                KnowledgeItem.tags.contains(kw),
+                KnowledgeItem.related_symbol.contains(kw),
+                KnowledgeItem.related_pattern.contains(kw),
+                KnowledgeItem.related_regime.contains(kw),
+            )
+        )
+    return query.order_by(KnowledgeItem.updated_at.desc(), KnowledgeItem.id.desc()).offset((page - 1) * size).limit(size).all()
+
+
+@app.post("/api/knowledge-items", response_model=KnowledgeItemResponse)
+def create_knowledge_item(data: KnowledgeItemCreate, db: Session = Depends(get_db)):
+    obj = KnowledgeItem(**data.model_dump())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@app.get("/api/knowledge-items/{item_id}", response_model=KnowledgeItemResponse)
+def get_knowledge_item(item_id: int, db: Session = Depends(get_db)):
+    obj = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
+    if not obj:
+        raise HTTPException(404, "Knowledge item not found")
+    return obj
+
+
+@app.put("/api/knowledge-items/{item_id}", response_model=KnowledgeItemResponse)
+def update_knowledge_item(item_id: int, data: KnowledgeItemUpdate, db: Session = Depends(get_db)):
+    obj = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
+    if not obj:
+        raise HTTPException(404, "Knowledge item not found")
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(obj, k, v)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@app.delete("/api/knowledge-items/{item_id}")
+def delete_knowledge_item(item_id: int, db: Session = Depends(get_db)):
+    obj = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
+    if not obj:
+        raise HTTPException(404, "Knowledge item not found")
+    db.delete(obj)
+    db.commit()
+    return {"ok": True}
+
+
 # ── Review ──
+
+
+def _attach_review_link_fields(db: Session, rows: List[Review]) -> List[Review]:
+    if not rows:
+        return rows
+    review_ids = [r.id for r in rows if r.id]
+    if not review_ids:
+        return rows
+    link_rows = (
+        db.query(ReviewTradeLink)
+        .filter(ReviewTradeLink.review_id.in_(review_ids))
+        .order_by(ReviewTradeLink.review_id.asc(), ReviewTradeLink.id.asc())
+        .all()
+    )
+    grouped: Dict[int, List[ReviewTradeLink]] = {}
+    for link in link_rows:
+        grouped.setdefault(link.review_id, []).append(link)
+    for row in rows:
+        links = grouped.get(row.id, [])
+        setattr(row, "trade_links", links)
+        setattr(row, "linked_trade_ids", [x.trade_id for x in links])
+    return rows
+
+
+def _sync_review_trade_links(db: Session, review: Review, links: List[Dict[str, Any]]) -> None:
+    db.query(ReviewTradeLink).filter(ReviewTradeLink.review_id == review.id).delete()
+    if not links:
+        return
+    requested_trade_ids = [int(x["trade_id"]) for x in links if x.get("trade_id")]
+    if requested_trade_ids:
+        existing_trade_ids = {
+            trade_id for (trade_id,) in db.query(Trade.id).filter(Trade.id.in_(requested_trade_ids)).all()
+        }
+        missing = [str(tid) for tid in requested_trade_ids if tid not in existing_trade_ids]
+        if missing:
+            raise HTTPException(400, f"trade_id 不存在: {', '.join(missing)}")
+    for item in links:
+        db.add(
+            ReviewTradeLink(
+                review_id=review.id,
+                trade_id=int(item["trade_id"]),
+                role=(item.get("role") or "linked_trade").strip() or "linked_trade",
+                notes=item.get("notes"),
+            )
+        )
 
 
 @app.get("/api/reviews", response_model=List[ReviewResponse])
@@ -1103,7 +1235,8 @@ def list_reviews(
         q = q.filter(Review.review_date >= date_from)
     if date_to:
         q = q.filter(Review.review_date <= date_to)
-    return q.order_by(Review.review_date.desc()).offset((page - 1) * size).limit(size).all()
+    rows = q.order_by(Review.review_date.desc()).offset((page - 1) * size).limit(size).all()
+    return _attach_review_link_fields(db, rows)
 
 
 @app.post("/api/reviews", response_model=ReviewResponse)
@@ -1112,7 +1245,7 @@ def create_review(review: ReviewCreate, db: Session = Depends(get_db)):
     db.add(obj)
     db.commit()
     db.refresh(obj)
-    return obj
+    return _attach_review_link_fields(db, [obj])[0]
 
 
 @app.get("/api/reviews/{review_id}", response_model=ReviewResponse)
@@ -1120,7 +1253,7 @@ def get_review(review_id: int, db: Session = Depends(get_db)):
     r = db.query(Review).filter(Review.id == review_id).first()
     if not r:
         raise HTTPException(404, "Review not found")
-    return r
+    return _attach_review_link_fields(db, [r])[0]
 
 
 @app.put("/api/reviews/{review_id}", response_model=ReviewResponse)
@@ -1132,7 +1265,7 @@ def update_review(review_id: int, data: ReviewUpdate, db: Session = Depends(get_
         setattr(r, k, v)
     db.commit()
     db.refresh(r)
-    return r
+    return _attach_review_link_fields(db, [r])[0]
 
 
 @app.delete("/api/reviews/{review_id}")
@@ -1143,6 +1276,21 @@ def delete_review(review_id: int, db: Session = Depends(get_db)):
     db.delete(r)
     db.commit()
     return {"ok": True}
+
+
+@app.put("/api/reviews/{review_id}/trade-links", response_model=ReviewResponse)
+def upsert_review_trade_links(review_id: int, payload: ReviewTradeLinksPayload, db: Session = Depends(get_db)):
+    r = db.query(Review).filter(Review.id == review_id).first()
+    if not r:
+        raise HTTPException(404, "Review not found")
+    _sync_review_trade_links(
+        db,
+        r,
+        [x.model_dump() for x in (payload.trade_links or [])],
+    )
+    db.commit()
+    db.refresh(r)
+    return _attach_review_link_fields(db, [r])[0]
 
 
 # ── Notebook ──

@@ -162,8 +162,54 @@ class Review(Base):
     pause_patterns = Column(Text)
 
     # 通用
+    title = Column(String(200))
+    review_scope = Column(String(30), default="periodic")
+    focus_topic = Column(String(200))
+    market_regime = Column(String(100))
+    action_items = Column(Text)
     content = Column(Text)
     summary = Column(Text)
+    trade_links = relationship("ReviewTradeLink", back_populates="review", cascade="all, delete-orphan")
+
+
+class ReviewTradeLink(Base):
+    __tablename__ = "review_trade_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    review_id = Column(Integer, ForeignKey("reviews.id"), nullable=False, index=True)
+    trade_id = Column(Integer, ForeignKey("trades.id"), nullable=False, index=True)
+    role = Column(String(30), default="linked_trade")
+    notes = Column(Text)
+
+    review = relationship("Review", back_populates="trade_links")
+    trade = relationship("Trade")
+
+
+class KnowledgeItem(Base):
+    __tablename__ = "knowledge_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    category = Column(String(50), nullable=False, index=True)
+    title = Column(String(200), nullable=False, index=True)
+    summary = Column(Text)
+    content = Column(Text)
+    tags = Column(Text)
+
+    related_symbol = Column(String(50))
+    related_pattern = Column(String(100))
+    related_regime = Column(String(100))
+
+    status = Column(String(30), default="active")
+    priority = Column(String(20), default="medium")
+    next_action = Column(Text)
+    due_date = Column(Date)
+    source_ref = Column(String(200))
 
 
 class Notebook(Base):

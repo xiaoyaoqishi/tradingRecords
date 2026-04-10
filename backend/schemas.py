@@ -256,6 +256,10 @@ class TradeBrokerResponse(TradeBrokerCreate):
 class ReviewCreate(BaseModel):
     review_type: str
     review_date: date
+    title: Optional[str] = None
+    review_scope: Optional[str] = "periodic"
+    focus_topic: Optional[str] = None
+    market_regime: Optional[str] = None
     best_trade: Optional[str] = None
     worst_trade: Optional[str] = None
     discipline_violated: Optional[bool] = None
@@ -274,6 +278,7 @@ class ReviewCreate(BaseModel):
     adjust_symbols: Optional[str] = None
     adjust_position: Optional[str] = None
     pause_patterns: Optional[str] = None
+    action_items: Optional[str] = None
     content: Optional[str] = None
     summary: Optional[str] = None
 
@@ -281,6 +286,10 @@ class ReviewCreate(BaseModel):
 class ReviewUpdate(BaseModel):
     review_type: Optional[str] = None
     review_date: Optional[date] = None
+    title: Optional[str] = None
+    review_scope: Optional[str] = None
+    focus_topic: Optional[str] = None
+    market_regime: Optional[str] = None
     best_trade: Optional[str] = None
     worst_trade: Optional[str] = None
     discipline_violated: Optional[bool] = None
@@ -299,11 +308,75 @@ class ReviewUpdate(BaseModel):
     adjust_symbols: Optional[str] = None
     adjust_position: Optional[str] = None
     pause_patterns: Optional[str] = None
+    action_items: Optional[str] = None
     content: Optional[str] = None
     summary: Optional[str] = None
 
 
+class ReviewTradeLinkUpsert(BaseModel):
+    trade_id: int
+    role: Optional[str] = "linked_trade"
+    notes: Optional[str] = None
+
+
+class ReviewTradeLinkResponse(ReviewTradeLinkUpsert):
+    id: int
+    review_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class ReviewResponse(ReviewCreate):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    trade_links: List[ReviewTradeLinkResponse] = []
+    linked_trade_ids: List[int] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ReviewTradeLinksPayload(BaseModel):
+    trade_links: List[ReviewTradeLinkUpsert] = []
+
+
+class KnowledgeItemCreate(BaseModel):
+    category: str
+    title: str
+    summary: Optional[str] = None
+    content: Optional[str] = None
+    tags: Optional[str] = None
+    related_symbol: Optional[str] = None
+    related_pattern: Optional[str] = None
+    related_regime: Optional[str] = None
+    status: Optional[str] = "active"
+    priority: Optional[str] = "medium"
+    next_action: Optional[str] = None
+    due_date: Optional[date] = None
+    source_ref: Optional[str] = None
+
+
+class KnowledgeItemUpdate(BaseModel):
+    category: Optional[str] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    content: Optional[str] = None
+    tags: Optional[str] = None
+    related_symbol: Optional[str] = None
+    related_pattern: Optional[str] = None
+    related_regime: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    next_action: Optional[str] = None
+    due_date: Optional[date] = None
+    source_ref: Optional[str] = None
+
+
+class KnowledgeItemResponse(KnowledgeItemCreate):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
