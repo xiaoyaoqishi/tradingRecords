@@ -79,6 +79,52 @@ class Trade(Base):
     error_tags = Column(Text)
     review_note = Column(Text)
     notes = Column(Text)
+    trade_review = relationship("TradeReview", back_populates="trade", uselist=False, cascade="all, delete-orphan")
+    source_metadata = relationship("TradeSourceMetadata", back_populates="trade", uselist=False, cascade="all, delete-orphan")
+
+
+class TradeReview(Base):
+    __tablename__ = "trade_reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    trade_id = Column(Integer, ForeignKey("trades.id"), nullable=False, unique=True, index=True)
+
+    opportunity_structure = Column(String(50))
+    edge_source = Column(String(50))
+    failure_type = Column(String(50))
+    review_conclusion = Column(String(50))
+
+    entry_thesis = Column(Text)
+    invalidation_valid_evidence = Column(Text)
+    invalidation_trigger_evidence = Column(Text)
+    invalidation_boundary = Column(Text)
+    management_actions = Column(Text)
+    exit_reason = Column(Text)
+    review_tags = Column(Text)
+    research_notes = Column(Text)
+
+    trade = relationship("Trade", back_populates="trade_review")
+
+
+class TradeSourceMetadata(Base):
+    __tablename__ = "trade_source_metadata"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    trade_id = Column(Integer, ForeignKey("trades.id"), nullable=False, unique=True, index=True)
+    broker_name = Column(String(100))
+    source_label = Column(String(100))
+    import_channel = Column(String(50))
+    source_note_snapshot = Column(Text)
+    parser_version = Column(String(30))
+    derived_from_notes = Column(Boolean, default=True)
+
+    trade = relationship("Trade", back_populates="source_metadata")
 
 
 class Review(Base):

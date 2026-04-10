@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime
 
+from trade_review_taxonomy import OpportunityStructure, EdgeSource, FailureType, ReviewConclusion
 
 class TradeCreate(BaseModel):
     trade_date: date
@@ -167,6 +168,59 @@ class TradePositionResponse(BaseModel):
     avg_open_price: float
     open_since: Optional[date] = None
     last_trade_date: Optional[date] = None
+
+
+class TradeReviewUpsert(BaseModel):
+    opportunity_structure: Optional[OpportunityStructure] = None
+    edge_source: Optional[EdgeSource] = None
+    failure_type: Optional[FailureType] = None
+    review_conclusion: Optional[ReviewConclusion] = None
+
+    entry_thesis: Optional[str] = None
+    invalidation_valid_evidence: Optional[str] = None
+    invalidation_trigger_evidence: Optional[str] = None
+    invalidation_boundary: Optional[str] = None
+    management_actions: Optional[str] = None
+    exit_reason: Optional[str] = None
+    review_tags: Optional[str] = None
+    research_notes: Optional[str] = None
+
+
+class TradeReviewResponse(TradeReviewUpsert):
+    id: int
+    trade_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TradeReviewTaxonomyResponse(BaseModel):
+    opportunity_structure: List[str]
+    edge_source: List[str]
+    failure_type: List[str]
+    review_conclusion: List[str]
+
+
+class TradeSourceMetadataUpsert(BaseModel):
+    broker_name: Optional[str] = None
+    source_label: Optional[str] = None
+    import_channel: Optional[str] = None
+    source_note_snapshot: Optional[str] = None
+    parser_version: Optional[str] = None
+    derived_from_notes: Optional[bool] = None
+
+
+class TradeSourceMetadataResponse(TradeSourceMetadataUpsert):
+    id: Optional[int] = None
+    trade_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    exists_in_db: bool = False
+
+    class Config:
+        from_attributes = True
 
 
 class TradeBrokerCreate(BaseModel):

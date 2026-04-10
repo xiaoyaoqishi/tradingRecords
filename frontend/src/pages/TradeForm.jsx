@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import { SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
-import { tradeApi } from '../api';
+import { tradeApi, tradeReviewApi } from '../api';
 import dayjs from 'dayjs';
 
 const { TextArea } = Input;
@@ -16,19 +16,75 @@ const ERROR_TAGS = [
   '逆势操作', '低流动性误判', '夜盘执行变形',
 ];
 
+const TRADE_REVIEW_FIELDS = [
+  'opportunity_structure',
+  'edge_source',
+  'failure_type',
+  'review_conclusion',
+  'entry_thesis',
+  'invalidation_valid_evidence',
+  'invalidation_trigger_evidence',
+  'invalidation_boundary',
+  'management_actions',
+  'exit_reason',
+  'review_tags',
+  'research_notes',
+];
+
+const EMPTY_REVIEW_TAXONOMY = {
+  opportunity_structure: [],
+  edge_source: [],
+  failure_type: [],
+  review_conclusion: [],
+};
+
 const opt = (arr) => arr.map(v => ({ label: v, value: v }));
 
 export default function TradeForm() {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const [reviewExists, setReviewExists] = useState(false);
+  const [reviewTaxonomy, setReviewTaxonomy] = useState(EMPTY_REVIEW_TAXONOMY);
   const navigate = useNavigate();
   const { id } = useParams();
   const isEdit = !!id;
 
   useEffect(() => {
-    if (isEdit) {
-      tradeApi.get(id).then(res => {
-        const d = { ...res.data };
+    let alive = true;
+    tradeReviewApi.taxonomy()
+      .then((res) => {
+        if (!alive) return;
+        setReviewTaxonomy({
+          opportunity_structure: res.data?.opportunity_structure || [],
+          edge_source: res.data?.edge_source || [],
+          failure_type: res.data?.failure_type || [],
+          review_conclusion: res.data?.review_conclusion || [],
+        });
+      })
+      .catch(() => {
+        if (alive) {
+          setReviewTaxonomy(EMPTY_REVIEW_TAXONOMY);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const reviewInitFields = Object.fromEntries(TRADE_REVIEW_FIELDS.map((f) => [f, undefined]));
+
+    const loadData = async () => {
+      if (!isEdit) {
+        setReviewExists(false);
+        form.setFieldsValue(reviewInitFields);
+        return;
+      }
+      try {
+        const tradeRes = await tradeApi.get(id);
+        if (!alive) return;
+        const d = { ...tradeRes.data };
         if (d.trade_date) d.trade_date = dayjs(d.trade_date);
         if (d.open_time) d.open_time = dayjs(d.open_time);
         if (d.close_time) d.close_time = dayjs(d.close_time);
@@ -36,26 +92,69 @@ export default function TradeForm() {
           try { d.error_tags = JSON.parse(d.error_tags); } catch { /* keep as-is */ }
         }
         form.setFieldsValue(d);
-      }).catch(() => message.error('加载失败'));
-    }
-  }, [id]);
+
+        try {
+          const reviewRes = await tradeReviewApi.get(id);
+          if (!alive) return;
+          form.setFieldsValue(reviewRes.data || {});
+          setReviewExists(true);
+        } catch (e) {
+          if (!alive) return;
+          if (e.response?.status === 404) {
+            setReviewExists(false);
+            form.setFieldsValue(reviewInitFields);
+          } else {
+            message.error('结构化复盘加载失败');
+          }
+        }
+      } catch {
+        if (alive) message.error('加载失败');
+      }
+    };
+    loadData();
+    return () => {
+      alive = false;
+    };
+  }, [id, isEdit, form]);
 
   const onFinish = async (values) => {
     setLoading(true);
     try {
       const data = { ...values };
+      const reviewData = {};
+      TRADE_REVIEW_FIELDS.forEach((field) => {
+        reviewData[field] = data[field];
+        delete data[field];
+      });
+
       if (data.trade_date) data.trade_date = data.trade_date.format('YYYY-MM-DD');
       if (data.open_time) data.open_time = data.open_time.format('YYYY-MM-DDTHH:mm:ss');
       if (data.close_time) data.close_time = data.close_time.format('YYYY-MM-DDTHH:mm:ss');
       if (Array.isArray(data.error_tags)) data.error_tags = JSON.stringify(data.error_tags);
 
+      let tradeId = id;
       if (isEdit) {
         await tradeApi.update(id, data);
-        message.success('更新成功');
       } else {
-        await tradeApi.create(data);
-        message.success('创建成功');
+        const createRes = await tradeApi.create(data);
+        tradeId = createRes.data?.id;
       }
+
+      const normalizedReview = {};
+      Object.entries(reviewData).forEach(([k, v]) => {
+        normalizedReview[k] = typeof v === 'string' ? v.trim() : v;
+      });
+      const hasReviewData = Object.values(normalizedReview).some((v) => v !== null && v !== undefined && v !== '');
+
+      if (tradeId && hasReviewData) {
+        await tradeReviewApi.upsert(tradeId, normalizedReview);
+        setReviewExists(true);
+      } else if (tradeId && isEdit && reviewExists) {
+        await tradeReviewApi.delete(tradeId);
+        setReviewExists(false);
+      }
+
+      message.success(isEdit ? '更新成功' : '创建成功');
       navigate('/trades');
     } catch (e) {
       message.error('保存失败: ' + (e.response?.data?.detail || e.message));
@@ -208,6 +307,51 @@ export default function TradeForm() {
           </Col>
           <Col span={24}><Form.Item label="复盘一句话" name="review_note"><TextArea rows={3} /></Form.Item></Col>
           <Col span={24}><Form.Item label="备注" name="notes"><TextArea rows={3} /></Form.Item></Col>
+          <Col span={24}><Divider>结构化复盘（TradeReview）</Divider></Col>
+          <Col span={12}>
+            <Form.Item label="机会结构" name="opportunity_structure">
+              <Select
+                allowClear
+                options={opt(reviewTaxonomy.opportunity_structure)}
+                placeholder="选择机会结构"
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="优势来源" name="edge_source">
+              <Select
+                allowClear
+                options={opt(reviewTaxonomy.edge_source)}
+                placeholder="选择优势来源"
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="失败类型" name="failure_type">
+              <Select
+                allowClear
+                options={opt(reviewTaxonomy.failure_type)}
+                placeholder="选择失败类型"
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="复盘结论" name="review_conclusion">
+              <Select
+                allowClear
+                options={opt(reviewTaxonomy.review_conclusion)}
+                placeholder="选择复盘结论"
+              />
+            </Form.Item>
+          </Col>
+          <Col span={24}><Form.Item label="入场论点" name="entry_thesis"><TextArea rows={2} /></Form.Item></Col>
+          <Col span={12}><Form.Item label="有效证据" name="invalidation_valid_evidence"><TextArea rows={2} /></Form.Item></Col>
+          <Col span={12}><Form.Item label="失效证据" name="invalidation_trigger_evidence"><TextArea rows={2} /></Form.Item></Col>
+          <Col span={24}><Form.Item label="相似但不同边界" name="invalidation_boundary"><TextArea rows={2} /></Form.Item></Col>
+          <Col span={24}><Form.Item label="管理动作" name="management_actions"><TextArea rows={2} /></Form.Item></Col>
+          <Col span={24}><Form.Item label="离场原因" name="exit_reason"><TextArea rows={2} /></Form.Item></Col>
+          <Col span={24}><Form.Item label="复盘标签" name="review_tags"><Input /></Form.Item></Col>
+          <Col span={24}><Form.Item label="研究记录" name="research_notes"><TextArea rows={3} /></Form.Item></Col>
         </Row>
       ),
     },

@@ -32,10 +32,12 @@ from bs4 import BeautifulSoup
 DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
 
 from database import engine, get_db, Base, SessionLocal
-from models import Trade, Review, Notebook, Note, NoteLink, TodoItem, NewsIssue, TradeBroker
+from models import Trade, TradeReview, TradeSourceMetadata, Review, Notebook, Note, NoteLink, TodoItem, NewsIssue, TradeBroker
 from schemas import (
     TradeCreate, TradeUpdate, TradeResponse,
     TradePasteImportRequest, TradePasteImportResponse, TradePasteImportError, TradePositionResponse,
+    TradeReviewUpsert, TradeReviewResponse, TradeReviewTaxonomyResponse,
+    TradeSourceMetadataUpsert, TradeSourceMetadataResponse,
     TradeBrokerCreate, TradeBrokerUpdate, TradeBrokerResponse,
     ReviewCreate, ReviewUpdate, ReviewResponse,
     NotebookCreate, NotebookUpdate, NotebookResponse,
@@ -44,6 +46,7 @@ from schemas import (
     NewsIssueResponse, NewsIssueDetailResponse,
 )
 from auth import load_credentials, save_credentials, check_login, create_token, verify_token
+from trade_review_taxonomy import trade_review_taxonomy
 
 Base.metadata.create_all(bind=engine)
 
@@ -414,6 +417,19 @@ def _append_note(base: Optional[str], extra: str) -> str:
     if not b:
         return extra
     return f"{b} | {extra}"
+
+
+def _extract_source_from_notes(note: Optional[str]) -> Dict[str, Optional[str]]:
+    text = str(note or "")
+    broker = None
+    source = None
+    m_broker = re.search(r"来源券商:\s*([^|]+)", text)
+    if m_broker and m_broker.group(1).strip():
+        broker = m_broker.group(1).strip()
+    m_source = re.search(r"来源:\s*([^|]+)", text)
+    if m_source and m_source.group(1).strip():
+        source = m_source.group(1).strip()
+    return {"broker_name": broker, "source_label": source}
 
 
 def _copy_trade_for_closed_part(src: Trade, close_qty: float, close_price: float, close_time: datetime, close_commission: float, close_pnl: float) -> Trade:
@@ -878,7 +894,7 @@ def create_trade(trade: TradeCreate, db: Session = Depends(get_db)):
     return obj
 
 
-@app.get("/api/trades/{trade_id}", response_model=TradeResponse)
+@app.get("/api/trades/{trade_id:int}", response_model=TradeResponse)
 def get_trade(trade_id: int, db: Session = Depends(get_db)):
     t = db.query(Trade).filter(Trade.id == trade_id).first()
     if not t:
@@ -886,7 +902,7 @@ def get_trade(trade_id: int, db: Session = Depends(get_db)):
     return t
 
 
-@app.put("/api/trades/{trade_id}", response_model=TradeResponse)
+@app.put("/api/trades/{trade_id:int}", response_model=TradeResponse)
 def update_trade(trade_id: int, data: TradeUpdate, db: Session = Depends(get_db)):
     t = db.query(Trade).filter(Trade.id == trade_id).first()
     if not t:
@@ -898,7 +914,7 @@ def update_trade(trade_id: int, data: TradeUpdate, db: Session = Depends(get_db)
     return t
 
 
-@app.delete("/api/trades/{trade_id}")
+@app.delete("/api/trades/{trade_id:int}")
 def delete_trade(trade_id: int, db: Session = Depends(get_db)):
     t = db.query(Trade).filter(Trade.id == trade_id).first()
     if not t:
@@ -915,13 +931,130 @@ def list_trade_sources(db: Session = Depends(get_db)):
     for b in broker_rows:
         if b.name and b.name.strip():
             values.add(b.name.strip())
+    metadata_rows = db.query(TradeSourceMetadata).all()
+    for row in metadata_rows:
+        if row.broker_name and row.broker_name.strip():
+            values.add(row.broker_name.strip())
+        if row.source_label and row.source_label.strip():
+            values.add(row.source_label.strip())
     note_rows = db.query(Trade.notes).filter(Trade.notes.isnot(None)).all()
     for (note,) in note_rows:
-        text = str(note or "")
-        m = re.search(r"来源券商:\s*([^|]+)", text)
-        if m and m.group(1).strip():
-            values.add(m.group(1).strip())
+        parsed = _extract_source_from_notes(note)
+        if parsed["broker_name"]:
+            values.add(parsed["broker_name"])
     return {"items": sorted(values)}
+
+
+@app.get("/api/trade-review-taxonomy", response_model=TradeReviewTaxonomyResponse)
+def get_trade_review_taxonomy():
+    return TradeReviewTaxonomyResponse(**trade_review_taxonomy())
+
+
+@app.get("/api/trades/{trade_id:int}/review", response_model=TradeReviewResponse)
+def get_trade_review(trade_id: int, db: Session = Depends(get_db)):
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(404, "Trade not found")
+    review = db.query(TradeReview).filter(TradeReview.trade_id == trade_id).first()
+    if not review:
+        raise HTTPException(404, "Trade review not found")
+    return review
+
+
+@app.put("/api/trades/{trade_id:int}/review", response_model=TradeReviewResponse)
+def upsert_trade_review(trade_id: int, data: TradeReviewUpsert, db: Session = Depends(get_db)):
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(404, "Trade not found")
+
+    review = db.query(TradeReview).filter(TradeReview.trade_id == trade_id).first()
+    if not review:
+        review = TradeReview(trade_id=trade_id)
+        db.add(review)
+
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(review, k, v)
+    db.commit()
+    db.refresh(review)
+    return review
+
+
+@app.delete("/api/trades/{trade_id:int}/review")
+def delete_trade_review(trade_id: int, db: Session = Depends(get_db)):
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(404, "Trade not found")
+    review = db.query(TradeReview).filter(TradeReview.trade_id == trade_id).first()
+    if not review:
+        return {"ok": True}
+    db.delete(review)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/trades/{trade_id:int}/source-metadata", response_model=TradeSourceMetadataResponse)
+def get_trade_source_metadata(trade_id: int, db: Session = Depends(get_db)):
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(404, "Trade not found")
+
+    row = db.query(TradeSourceMetadata).filter(TradeSourceMetadata.trade_id == trade_id).first()
+    if row:
+        return TradeSourceMetadataResponse(
+            id=row.id,
+            trade_id=row.trade_id,
+            broker_name=row.broker_name,
+            source_label=row.source_label,
+            import_channel=row.import_channel,
+            source_note_snapshot=row.source_note_snapshot,
+            parser_version=row.parser_version,
+            derived_from_notes=bool(row.derived_from_notes),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            exists_in_db=True,
+        )
+
+    parsed = _extract_source_from_notes(trade.notes)
+    return TradeSourceMetadataResponse(
+        trade_id=trade_id,
+        broker_name=parsed["broker_name"],
+        source_label=parsed["source_label"],
+        import_channel=None,
+        source_note_snapshot=trade.notes,
+        parser_version=None,
+        derived_from_notes=True,
+        exists_in_db=False,
+    )
+
+
+@app.put("/api/trades/{trade_id:int}/source-metadata", response_model=TradeSourceMetadataResponse)
+def upsert_trade_source_metadata(trade_id: int, data: TradeSourceMetadataUpsert, db: Session = Depends(get_db)):
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(404, "Trade not found")
+
+    row = db.query(TradeSourceMetadata).filter(TradeSourceMetadata.trade_id == trade_id).first()
+    if not row:
+        row = TradeSourceMetadata(trade_id=trade_id)
+        db.add(row)
+
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(row, k, v)
+    db.commit()
+    db.refresh(row)
+    return TradeSourceMetadataResponse(
+        id=row.id,
+        trade_id=row.trade_id,
+        broker_name=row.broker_name,
+        source_label=row.source_label,
+        import_channel=row.import_channel,
+        source_note_snapshot=row.source_note_snapshot,
+        parser_version=row.parser_version,
+        derived_from_notes=bool(row.derived_from_notes),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        exists_in_db=True,
+    )
 
 
 @app.get("/api/trade-brokers", response_model=List[TradeBrokerResponse])

@@ -40,4 +40,11 @@ export const reviewApi = {
   delete: (id) => api.delete(`/reviews/${id}`),
 };
 
+export const tradeReviewApi = {
+  taxonomy: () => api.get('/trade-review-taxonomy'),
+  get: (tradeId) => api.get(`/trades/${tradeId}/review`),
+  upsert: (tradeId, data) => api.put(`/trades/${tradeId}/review`, data),
+  delete: (tradeId) => api.delete(`/trades/${tradeId}/review`),
+};
+
 export default api;
