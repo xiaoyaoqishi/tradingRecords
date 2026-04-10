@@ -41,6 +41,7 @@ def list_knowledge_items(
     *,
     category: Optional[str],
     status: Optional[str],
+    tag: Optional[str],
     keyword: Optional[str],
     page: int,
     size: int,
@@ -50,6 +51,8 @@ def list_knowledge_items(
         query = query.filter(KnowledgeItem.category == category)
     if status:
         query = query.filter(KnowledgeItem.status == status)
+    if tag and tag.strip():
+        query = query.filter(KnowledgeItem.tags_text.contains(tag.strip()))
     if keyword and keyword.strip():
         kw = keyword.strip()
         query = query.filter(
@@ -57,7 +60,7 @@ def list_knowledge_items(
                 KnowledgeItem.title.contains(kw),
                 KnowledgeItem.summary.contains(kw),
                 KnowledgeItem.content.contains(kw),
-                KnowledgeItem.tags.contains(kw),
+                KnowledgeItem.tags_text.contains(kw),
                 KnowledgeItem.related_symbol.contains(kw),
                 KnowledgeItem.related_pattern.contains(kw),
                 KnowledgeItem.related_regime.contains(kw),
@@ -78,4 +81,3 @@ def list_knowledge_categories(db: Session) -> List[str]:
         if category and str(category).strip():
             values.add(str(category).strip())
     return sorted(values)
-

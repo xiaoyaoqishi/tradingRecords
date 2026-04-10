@@ -16,7 +16,7 @@ export const EMPTY_REVIEW = {
   invalidation_boundary: '',
   management_actions: '',
   exit_reason: '',
-  review_tags: '',
+  tags: [],
   research_notes: '',
 };
 
@@ -30,7 +30,19 @@ export const EMPTY_SOURCE = {
   derived_from_notes: true,
 };
 
-export const REVIEW_FIELD_KEYS = Object.keys(EMPTY_REVIEW);
+export const REVIEW_FIELD_KEYS = [
+  'opportunity_structure',
+  'edge_source',
+  'failure_type',
+  'review_conclusion',
+  'entry_thesis',
+  'invalidation_valid_evidence',
+  'invalidation_trigger_evidence',
+  'invalidation_boundary',
+  'management_actions',
+  'exit_reason',
+  'research_notes',
+];
 
 export function normalizeText(val) {
   if (val === undefined || val === null) return null;

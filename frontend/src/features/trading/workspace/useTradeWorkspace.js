@@ -148,6 +148,12 @@ export function useTradeWorkspace() {
       REVIEW_FIELD_KEYS.forEach((k) => {
         normalizedReview[k] = reviewData?.[k] || '';
       });
+      normalizedReview.tags = Array.isArray(reviewData?.tags)
+        ? reviewData.tags
+        : String(reviewData?.review_tags || '')
+            .split(/[,\n;|，、]+/)
+            .map((x) => x.trim())
+            .filter(Boolean);
       setDetailReview(normalizedReview);
       setDetailReviewExists(!!reviewRes.data);
 
@@ -191,7 +197,10 @@ export function useTradeWorkspace() {
       REVIEW_FIELD_KEYS.forEach((k) => {
         payload[k] = normalizeText(detailReview[k]);
       });
-      const hasReviewData = Object.values(payload).some((v) => v !== null);
+      payload.tags = Array.isArray(detailReview.tags)
+        ? detailReview.tags.map((x) => String(x || '').trim()).filter(Boolean)
+        : [];
+      const hasReviewData = Object.entries(payload).some(([k, v]) => (k === 'tags' ? (v || []).length > 0 : v !== null));
       if (hasReviewData) {
         await tradeReviewApi.upsert(activeTradeId, payload);
         setDetailReviewExists(true);

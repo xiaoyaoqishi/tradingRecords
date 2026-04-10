@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, Date, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, Date, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -107,6 +107,7 @@ class TradeReview(Base):
     research_notes = Column(Text)
 
     trade = relationship("Trade", back_populates="trade_review")
+    tag_links = relationship("TradeReviewTagLink", back_populates="trade_review", cascade="all, delete-orphan")
 
 
 class TradeSourceMetadata(Base):
@@ -166,10 +167,12 @@ class Review(Base):
     review_scope = Column(String(30), default="periodic")
     focus_topic = Column(String(200))
     market_regime = Column(String(100))
+    tags_text = Column("tags", Text)
     action_items = Column(Text)
     content = Column(Text)
     summary = Column(Text)
     trade_links = relationship("ReviewTradeLink", back_populates="review", cascade="all, delete-orphan")
+    tag_links = relationship("ReviewTagLink", back_populates="review", cascade="all, delete-orphan")
 
 
 class ReviewTradeLink(Base):
@@ -199,7 +202,7 @@ class KnowledgeItem(Base):
     title = Column(String(200), nullable=False, index=True)
     summary = Column(Text)
     content = Column(Text)
-    tags = Column(Text)
+    tags_text = Column("tags", Text)
 
     related_symbol = Column(String(50))
     related_pattern = Column(String(100))
@@ -210,6 +213,66 @@ class KnowledgeItem(Base):
     next_action = Column(Text)
     due_date = Column(Date)
     source_ref = Column(String(200))
+    tag_links = relationship("KnowledgeItemTagLink", back_populates="knowledge_item", cascade="all, delete-orphan")
+
+
+class TagTerm(Base):
+    __tablename__ = "tag_terms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    name = Column(String(100), nullable=False)
+    name_key = Column(String(120), nullable=False, unique=True, index=True)
+
+
+class TradeReviewTagLink(Base):
+    __tablename__ = "trade_review_tag_links"
+    __table_args__ = (
+        UniqueConstraint("trade_review_id", "tag_term_id", name="uq_trade_review_tag"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    trade_review_id = Column(Integer, ForeignKey("trade_reviews.id"), nullable=False, index=True)
+    tag_term_id = Column(Integer, ForeignKey("tag_terms.id"), nullable=False, index=True)
+
+    trade_review = relationship("TradeReview", back_populates="tag_links")
+    tag_term = relationship("TagTerm")
+
+
+class ReviewTagLink(Base):
+    __tablename__ = "review_tag_links"
+    __table_args__ = (
+        UniqueConstraint("review_id", "tag_term_id", name="uq_review_tag"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    review_id = Column(Integer, ForeignKey("reviews.id"), nullable=False, index=True)
+    tag_term_id = Column(Integer, ForeignKey("tag_terms.id"), nullable=False, index=True)
+
+    review = relationship("Review", back_populates="tag_links")
+    tag_term = relationship("TagTerm")
+
+
+class KnowledgeItemTagLink(Base):
+    __tablename__ = "knowledge_item_tag_links"
+    __table_args__ = (
+        UniqueConstraint("knowledge_item_id", "tag_term_id", name="uq_knowledge_item_tag"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    knowledge_item_id = Column(Integer, ForeignKey("knowledge_items.id"), nullable=False, index=True)
+    tag_term_id = Column(Integer, ForeignKey("tag_terms.id"), nullable=False, index=True)
+
+    knowledge_item = relationship("KnowledgeItem", back_populates="tag_links")
+    tag_term = relationship("TagTerm")
 
 
 class Notebook(Base):

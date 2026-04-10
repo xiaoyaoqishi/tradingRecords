@@ -34,6 +34,7 @@ def test_trade_review_upsert_and_get(app_client):
         "review_conclusion": "valid_pattern_invalid_trade",
         "entry_thesis": "setup had structure but entry was late",
         "management_actions": "reduced size after volatility expansion",
+        "tags": ["趋势", "执行"],
         "research_notes": "needs tighter trigger on second leg",
     }
     put_resp = app_client.put(f"/api/trades/{trade_id}/review", json=payload)
@@ -50,6 +51,8 @@ def test_trade_review_upsert_and_get(app_client):
     assert fetched["opportunity_structure"] == "failed_breakout_reversal"
     assert fetched["entry_thesis"] == payload["entry_thesis"]
     assert fetched["research_notes"] == payload["research_notes"]
+    assert set(fetched["tags"]) == {"趋势", "执行"}
+    assert fetched["review_tags"] == "趋势,执行"
 
     trade_resp = app_client.get(f"/api/trades/{trade_id}")
     assert trade_resp.status_code == 200, trade_resp.text
@@ -123,3 +126,15 @@ def test_deleting_trade_review_does_not_delete_trade(app_client):
     assert review_after.status_code == 404, review_after.text
     trade_after = app_client.get(f"/api/trades/{trade_id}")
     assert trade_after.status_code == 200, trade_after.text
+
+
+def test_trade_review_tags_compatible_with_legacy_review_tags_string(app_client):
+    trade_id = _create_trade(app_client)
+    put_resp = app_client.put(
+        f"/api/trades/{trade_id}/review",
+        json={"review_tags": "纪律,执行"},
+    )
+    assert put_resp.status_code == 200, put_resp.text
+    body = put_resp.json()
+    assert set(body["tags"]) == {"纪律", "执行"}
+    assert body["review_tags"] == "纪律,执行"

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import date, datetime
 
 from trade_review_taxonomy import OpportunityStructure, EdgeSource, FailureType, ReviewConclusion
@@ -187,6 +187,7 @@ class TradeReviewUpsert(BaseModel):
     invalidation_boundary: Optional[str] = None
     management_actions: Optional[str] = None
     exit_reason: Optional[str] = None
+    tags: Optional[Union[List[str], str]] = None
     review_tags: Optional[str] = None
     research_notes: Optional[str] = None
 
@@ -196,6 +197,8 @@ class TradeReviewResponse(TradeReviewUpsert):
     trade_id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    tags: List[str] = []
+    review_tags: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -260,6 +263,7 @@ class ReviewCreate(BaseModel):
     review_scope: Optional[str] = "periodic"
     focus_topic: Optional[str] = None
     market_regime: Optional[str] = None
+    tags: Optional[Union[List[str], str]] = None
     best_trade: Optional[str] = None
     worst_trade: Optional[str] = None
     discipline_violated: Optional[bool] = None
@@ -290,6 +294,7 @@ class ReviewUpdate(BaseModel):
     review_scope: Optional[str] = None
     focus_topic: Optional[str] = None
     market_regime: Optional[str] = None
+    tags: Optional[Union[List[str], str]] = None
     best_trade: Optional[str] = None
     worst_trade: Optional[str] = None
     discipline_violated: Optional[bool] = None
@@ -319,9 +324,25 @@ class ReviewTradeLinkUpsert(BaseModel):
     notes: Optional[str] = None
 
 
+class TradeSummaryResponse(BaseModel):
+    trade_id: int
+    trade_date: Optional[date] = None
+    instrument_type: Optional[str] = None
+    symbol: Optional[str] = None
+    contract: Optional[str] = None
+    direction: Optional[str] = None
+    quantity: Optional[float] = None
+    open_price: Optional[float] = None
+    close_price: Optional[float] = None
+    status: Optional[str] = None
+    pnl: Optional[float] = None
+    source_display: Optional[str] = None
+
+
 class ReviewTradeLinkResponse(ReviewTradeLinkUpsert):
     id: int
     review_id: int
+    trade_summary: Optional[TradeSummaryResponse] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -333,6 +354,8 @@ class ReviewResponse(ReviewCreate):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    tags: List[str] = []
+    tags_text: Optional[str] = None
     trade_links: List[ReviewTradeLinkResponse] = []
     linked_trade_ids: List[int] = []
 
@@ -349,7 +372,7 @@ class KnowledgeItemCreate(BaseModel):
     title: str
     summary: Optional[str] = None
     content: Optional[str] = None
-    tags: Optional[str] = None
+    tags: Optional[Union[List[str], str]] = None
     related_symbol: Optional[str] = None
     related_pattern: Optional[str] = None
     related_regime: Optional[str] = None
@@ -365,7 +388,7 @@ class KnowledgeItemUpdate(BaseModel):
     title: Optional[str] = None
     summary: Optional[str] = None
     content: Optional[str] = None
-    tags: Optional[str] = None
+    tags: Optional[Union[List[str], str]] = None
     related_symbol: Optional[str] = None
     related_pattern: Optional[str] = None
     related_regime: Optional[str] = None
@@ -378,6 +401,8 @@ class KnowledgeItemUpdate(BaseModel):
 
 class KnowledgeItemResponse(KnowledgeItemCreate):
     id: int
+    tags: List[str] = []
+    tags_text: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

@@ -3,7 +3,8 @@ from typing import Any, Dict, List
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from models import Review, ReviewTradeLink, Trade
+from models import Review, ReviewTradeLink, Trade, TradeSourceMetadata
+from trading.source_service import resolve_trade_source_fields
 
 
 REVIEW_SCOPE_VALUES = {
@@ -50,8 +51,40 @@ def attach_review_link_fields(db: Session, rows: List[Review]) -> List[Review]:
     grouped: Dict[int, List[ReviewTradeLink]] = {}
     for link in link_rows:
         grouped.setdefault(link.review_id, []).append(link)
+    trade_ids = list({link.trade_id for link in link_rows if link.trade_id})
+    trade_by_id: Dict[int, Trade] = {}
+    metadata_by_trade_id: Dict[int, TradeSourceMetadata] = {}
+    if trade_ids:
+        trade_rows = db.query(Trade).filter(Trade.id.in_(trade_ids)).all()
+        trade_by_id = {t.id: t for t in trade_rows}
+        metadata_rows = db.query(TradeSourceMetadata).filter(TradeSourceMetadata.trade_id.in_(trade_ids)).all()
+        metadata_by_trade_id = {m.trade_id: m for m in metadata_rows}
     for row in rows:
         links = grouped.get(row.id, [])
+        for link in links:
+            trade = trade_by_id.get(link.trade_id)
+            if not trade:
+                setattr(link, "trade_summary", None)
+                continue
+            source_fields = resolve_trade_source_fields(trade, metadata_by_trade_id.get(trade.id))
+            setattr(
+                link,
+                "trade_summary",
+                {
+                    "trade_id": trade.id,
+                    "trade_date": trade.trade_date,
+                    "instrument_type": trade.instrument_type,
+                    "symbol": trade.symbol,
+                    "contract": trade.contract,
+                    "direction": trade.direction,
+                    "quantity": trade.quantity,
+                    "open_price": trade.open_price,
+                    "close_price": trade.close_price,
+                    "status": trade.status,
+                    "pnl": trade.pnl,
+                    "source_display": source_fields.get("source_display"),
+                },
+            )
         setattr(row, "trade_links", links)
         setattr(row, "linked_trade_ids", [x.trade_id for x in links])
     return rows
@@ -94,4 +127,3 @@ def sync_review_trade_links(db: Session, review: Review, links: List[Dict[str, A
                 notes=item.get("notes"),
             )
         )
-

@@ -28,7 +28,7 @@ const TRADE_REVIEW_FIELDS = [
   'invalidation_boundary',
   'management_actions',
   'exit_reason',
-  'review_tags',
+  'tags',
   'research_notes',
 ];
 
@@ -174,7 +174,10 @@ export default function TradeForm() {
       Object.entries(reviewData).forEach(([k, v]) => {
         normalizedReview[k] = typeof v === 'string' ? v.trim() : v;
       });
-      const hasReviewData = Object.values(normalizedReview).some((v) => v !== null && v !== undefined && v !== '');
+      const hasReviewData = Object.values(normalizedReview).some((v) => {
+        if (Array.isArray(v)) return v.length > 0;
+        return v !== null && v !== undefined && v !== '';
+      });
 
       if (tradeId && hasReviewData) {
         await tradeReviewApi.upsert(tradeId, normalizedReview);
@@ -393,7 +396,11 @@ export default function TradeForm() {
           <Col span={24}><Form.Item label="相似但不同边界" name="invalidation_boundary"><TextArea rows={2} /></Form.Item></Col>
           <Col span={24}><Form.Item label="管理动作" name="management_actions"><TextArea rows={2} /></Form.Item></Col>
           <Col span={24}><Form.Item label="离场原因" name="exit_reason"><TextArea rows={2} /></Form.Item></Col>
-          <Col span={24}><Form.Item label="复盘标签" name="review_tags"><Input /></Form.Item></Col>
+          <Col span={24}>
+            <Form.Item label="复盘标签" name="tags">
+              <Select mode="tags" tokenSeparators={[',', '，']} placeholder="输入并回车添加标签" />
+            </Form.Item>
+          </Col>
           <Col span={24}><Form.Item label="研究记录" name="research_notes"><TextArea rows={3} /></Form.Item></Col>
           <Col span={24}><Divider>来源元数据（TradeSourceMetadata）</Divider></Col>
           <Col span={12}><Form.Item label="券商" name="broker_name"><Input placeholder="例如：宏源期货" /></Form.Item></Col>

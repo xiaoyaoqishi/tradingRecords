@@ -70,6 +70,16 @@ from trading.knowledge_service import (
     list_knowledge_categories as _knowledge_list_categories,
     normalize_knowledge_payload as _knowledge_normalize_payload,
 )
+from trading.tag_service import (
+    normalize_tag_list as _normalize_tag_list,
+    serialize_legacy_tags as _serialize_legacy_tags,
+    sync_trade_review_tags as _sync_trade_review_tags,
+    sync_review_tags as _sync_review_tags,
+    sync_knowledge_item_tags as _sync_knowledge_item_tags,
+    attach_trade_review_tags as _attach_trade_review_tags,
+    attach_review_tags as _attach_review_tags,
+    attach_knowledge_item_tags as _attach_knowledge_item_tags,
+)
 
 Base.metadata.create_all(bind=engine)
 
@@ -108,6 +118,8 @@ def _migrate_legacy_schema():
             db.execute(text("ALTER TABLE reviews ADD COLUMN focus_topic VARCHAR(200)"))
         if "market_regime" not in review_cols:
             db.execute(text("ALTER TABLE reviews ADD COLUMN market_regime VARCHAR(100)"))
+        if "tags" not in review_cols:
+            db.execute(text("ALTER TABLE reviews ADD COLUMN tags TEXT"))
         if "action_items" not in review_cols:
             db.execute(text("ALTER TABLE reviews ADD COLUMN action_items TEXT"))
         db.commit()
@@ -917,7 +929,7 @@ def get_trade_review(trade_id: int, db: Session = Depends(get_db)):
     review = db.query(TradeReview).filter(TradeReview.trade_id == trade_id).first()
     if not review:
         raise HTTPException(404, "Trade review not found")
-    return review
+    return _attach_trade_review_tags(db, [review])[0]
 
 
 @app.put("/api/trades/{trade_id:int}/review", response_model=TradeReviewResponse)
@@ -931,11 +943,22 @@ def upsert_trade_review(trade_id: int, data: TradeReviewUpsert, db: Session = De
         review = TradeReview(trade_id=trade_id)
         db.add(review)
 
-    for k, v in data.model_dump(exclude_unset=True).items():
+    payload = data.model_dump(exclude_unset=True)
+    tags_raw = payload.pop("tags", None) if "tags" in payload else None
+    legacy_tags_raw = payload.get("review_tags") if "review_tags" in payload else None
+    for k, v in payload.items():
         setattr(review, k, v)
+
+    should_sync_tags = tags_raw is not None or legacy_tags_raw is not None
+    if should_sync_tags:
+        tag_names = _normalize_tag_list(tags_raw if tags_raw is not None else legacy_tags_raw)
+        review.review_tags = _serialize_legacy_tags(tag_names)
+        db.flush()
+        _sync_trade_review_tags(db, review.id, tag_names)
+
     db.commit()
     db.refresh(review)
-    return review
+    return _attach_trade_review_tags(db, [review])[0]
 
 
 @app.delete("/api/trades/{trade_id:int}/review")
@@ -1086,19 +1109,22 @@ def delete_trade_broker(broker_id: int, db: Session = Depends(get_db)):
 def list_knowledge_items(
     category: Optional[str] = None,
     status: Optional[str] = None,
+    tag: Optional[str] = None,
     q: Optional[str] = None,
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    return _knowledge_list_knowledge_items(
+    rows = _knowledge_list_knowledge_items(
         db,
         category=category,
         status=status,
+        tag=tag,
         keyword=q,
         page=page,
         size=size,
     )
+    return _attach_knowledge_item_tags(db, rows)
 
 
 @app.get("/api/knowledge-items/categories")
@@ -1109,11 +1135,16 @@ def list_knowledge_item_categories(db: Session = Depends(get_db)):
 @app.post("/api/knowledge-items", response_model=KnowledgeItemResponse)
 def create_knowledge_item(data: KnowledgeItemCreate, db: Session = Depends(get_db)):
     payload = _knowledge_normalize_payload(data.model_dump())
+    tags_raw = payload.pop("tags", None) if "tags" in payload else None
     obj = KnowledgeItem(**payload)
     db.add(obj)
+    db.flush()
+    tag_names = _normalize_tag_list(tags_raw)
+    obj.tags_text = _serialize_legacy_tags(tag_names)
+    _sync_knowledge_item_tags(db, obj.id, tag_names)
     db.commit()
     db.refresh(obj)
-    return obj
+    return _attach_knowledge_item_tags(db, [obj])[0]
 
 
 @app.get("/api/knowledge-items/{item_id}", response_model=KnowledgeItemResponse)
@@ -1121,7 +1152,7 @@ def get_knowledge_item(item_id: int, db: Session = Depends(get_db)):
     obj = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
     if not obj:
         raise HTTPException(404, "Knowledge item not found")
-    return obj
+    return _attach_knowledge_item_tags(db, [obj])[0]
 
 
 @app.put("/api/knowledge-items/{item_id}", response_model=KnowledgeItemResponse)
@@ -1130,11 +1161,17 @@ def update_knowledge_item(item_id: int, data: KnowledgeItemUpdate, db: Session =
     if not obj:
         raise HTTPException(404, "Knowledge item not found")
     payload = _knowledge_normalize_payload(data.model_dump(exclude_unset=True))
+    tags_raw = payload.pop("tags", None) if "tags" in payload else None
     for k, v in payload.items():
         setattr(obj, k, v)
+    if tags_raw is not None:
+        tag_names = _normalize_tag_list(tags_raw)
+        obj.tags_text = _serialize_legacy_tags(tag_names)
+        db.flush()
+        _sync_knowledge_item_tags(db, obj.id, tag_names)
     db.commit()
     db.refresh(obj)
-    return obj
+    return _attach_knowledge_item_tags(db, [obj])[0]
 
 
 @app.delete("/api/knowledge-items/{item_id}")
@@ -1154,6 +1191,12 @@ def _attach_review_link_fields(db: Session, rows: List[Review]) -> List[Review]:
     return _review_attach_review_link_fields(db, rows)
 
 
+def _attach_review_fields(db: Session, rows: List[Review]) -> List[Review]:
+    rows = _attach_review_tags(db, rows)
+    rows = _attach_review_link_fields(db, rows)
+    return rows
+
+
 def _sync_review_trade_links(db: Session, review: Review, links: List[Dict[str, Any]]) -> None:
     _review_sync_review_trade_links(db, review, links)
 
@@ -1162,6 +1205,7 @@ def _sync_review_trade_links(db: Session, review: Review, links: List[Dict[str, 
 def list_reviews(
     review_type: Optional[str] = None,
     review_scope: Optional[str] = None,
+    tag: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     page: int = Query(1, ge=1),
@@ -1173,23 +1217,30 @@ def list_reviews(
         q = q.filter(Review.review_type == review_type)
     if review_scope:
         q = q.filter(Review.review_scope == _review_normalize_review_scope(review_scope))
+    if tag and tag.strip():
+        q = q.filter(Review.tags_text.contains(tag.strip()))
     if date_from:
         q = q.filter(Review.review_date >= date_from)
     if date_to:
         q = q.filter(Review.review_date <= date_to)
     rows = q.order_by(Review.review_date.desc()).offset((page - 1) * size).limit(size).all()
-    return _attach_review_link_fields(db, rows)
+    return _attach_review_fields(db, rows)
 
 
 @app.post("/api/reviews", response_model=ReviewResponse)
 def create_review(review: ReviewCreate, db: Session = Depends(get_db)):
     payload = review.model_dump()
+    tags_raw = payload.pop("tags", None) if "tags" in payload else None
     payload["review_scope"] = _review_normalize_review_scope(payload.get("review_scope"))
     obj = Review(**payload)
     db.add(obj)
+    db.flush()
+    tag_names = _normalize_tag_list(tags_raw)
+    obj.tags_text = _serialize_legacy_tags(tag_names)
+    _sync_review_tags(db, obj.id, tag_names)
     db.commit()
     db.refresh(obj)
-    return _attach_review_link_fields(db, [obj])[0]
+    return _attach_review_fields(db, [obj])[0]
 
 
 @app.get("/api/reviews/{review_id}", response_model=ReviewResponse)
@@ -1197,7 +1248,7 @@ def get_review(review_id: int, db: Session = Depends(get_db)):
     r = db.query(Review).filter(Review.id == review_id).first()
     if not r:
         raise HTTPException(404, "Review not found")
-    return _attach_review_link_fields(db, [r])[0]
+    return _attach_review_fields(db, [r])[0]
 
 
 @app.put("/api/reviews/{review_id}", response_model=ReviewResponse)
@@ -1206,13 +1257,19 @@ def update_review(review_id: int, data: ReviewUpdate, db: Session = Depends(get_
     if not r:
         raise HTTPException(404, "Review not found")
     payload = data.model_dump(exclude_unset=True)
+    tags_raw = payload.pop("tags", None) if "tags" in payload else None
     if "review_scope" in payload:
         payload["review_scope"] = _review_normalize_review_scope(payload.get("review_scope"))
     for k, v in payload.items():
         setattr(r, k, v)
+    if tags_raw is not None:
+        tag_names = _normalize_tag_list(tags_raw)
+        r.tags_text = _serialize_legacy_tags(tag_names)
+        db.flush()
+        _sync_review_tags(db, r.id, tag_names)
     db.commit()
     db.refresh(r)
-    return _attach_review_link_fields(db, [r])[0]
+    return _attach_review_fields(db, [r])[0]
 
 
 @app.delete("/api/reviews/{review_id}")
@@ -1237,7 +1294,7 @@ def upsert_review_trade_links(review_id: int, payload: ReviewTradeLinksPayload, 
     )
     db.commit()
     db.refresh(r)
-    return _attach_review_link_fields(db, [r])[0]
+    return _attach_review_fields(db, [r])[0]
 
 
 # ── Notebook ──

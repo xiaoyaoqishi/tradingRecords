@@ -47,6 +47,10 @@ def test_review_trade_links_can_be_upserted_and_replaced(app_client):
     body = first_upsert.json()
     assert sorted(body["linked_trade_ids"]) == sorted([trade_a, trade_b])
     assert len(body["trade_links"]) == 2
+    first_summary = body["trade_links"][0]["trade_summary"]
+    assert first_summary is not None
+    assert "symbol" in first_summary
+    assert "source_display" in first_summary
 
     second_upsert = app_client.put(
         f"/api/reviews/{review_id}/trade-links",
@@ -69,6 +73,7 @@ def test_review_trade_links_can_be_upserted_and_replaced(app_client):
     assert fetched["linked_trade_ids"] == [trade_b]
     assert len(fetched["trade_links"]) == 1
     assert fetched["trade_links"][0]["trade_id"] == trade_b
+    assert fetched["trade_links"][0]["trade_summary"]["trade_id"] == trade_b
 
 
 def test_review_scope_invalid_value_is_normalized_to_custom(app_client):
@@ -95,6 +100,38 @@ def test_review_list_supports_scope_filter(app_client):
     assert themed_rows[0]["review_scope"] == "themed"
 
 
+def test_review_tags_array_and_filter(app_client):
+    create_resp = app_client.post(
+        "/api/reviews",
+        json={
+            "review_type": "weekly",
+            "review_scope": "themed",
+            "review_date": "2026-04-02",
+            "title": "tagged review",
+            "tags": ["趋势", "执行"],
+        },
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    review = create_resp.json()
+    assert set(review["tags"]) == {"趋势", "执行"}
+    assert review["tags_text"] == "趋势,执行"
+
+    update_resp = app_client.put(
+        f"/api/reviews/{review['id']}",
+        json={"tags": ["执行", "风控"]},
+    )
+    assert update_resp.status_code == 200, update_resp.text
+    updated = update_resp.json()
+    assert set(updated["tags"]) == {"执行", "风控"}
+    assert updated["tags_text"] == "执行,风控"
+
+    by_tag = app_client.get("/api/reviews", params={"tag": "风控", "size": 200})
+    assert by_tag.status_code == 200, by_tag.text
+    rows = by_tag.json()
+    assert len(rows) == 1
+    assert rows[0]["id"] == review["id"]
+
+
 def test_knowledge_item_crud_filters_and_categories(app_client):
     create_a = app_client.post(
         "/api/knowledge-items",
@@ -103,13 +140,15 @@ def test_knowledge_item_crud_filters_and_categories(app_client):
             "title": "趋势启动回调",
             "summary": "setup summary",
             "content": "entry and invalidation",
-            "tags": "trend,pullback",
+            "tags": ["trend", "pullback"],
             "status": "active",
             "priority": "high",
         },
     )
     assert create_a.status_code == 200, create_a.text
     item_a = create_a.json()
+    assert set(item_a["tags"]) == {"trend", "pullback"}
+    assert item_a["tags_text"] == "trend,pullback"
 
     create_b = app_client.post(
         "/api/knowledge-items",
@@ -118,7 +157,7 @@ def test_knowledge_item_crud_filters_and_categories(app_client):
             "title": "宏源期货通道备注",
             "summary": "broker memo",
             "content": "night session limits",
-            "tags": "broker,infra",
+            "tags": ["broker", "infra"],
             "status": "archived",
             "priority": "low",
         },
@@ -146,13 +185,20 @@ def test_knowledge_item_crud_filters_and_categories(app_client):
     assert keyword_search.status_code == 200, keyword_search.text
     assert item_a["id"] in [x["id"] for x in keyword_search.json()]
 
+    by_tag = app_client.get("/api/knowledge-items", params={"tag": "infra"})
+    assert by_tag.status_code == 200, by_tag.text
+    by_tag_rows = by_tag.json()
+    assert len(by_tag_rows) == 1
+    assert by_tag_rows[0]["id"] == item_b["id"]
+
     update_a = app_client.put(
         f"/api/knowledge-items/{item_a['id']}",
-        json={"status": "archived", "next_action": "next week retest"},
+        json={"status": "archived", "next_action": "next week retest", "tags": ["trend", "timing"]},
     )
     assert update_a.status_code == 200, update_a.text
     assert update_a.json()["status"] == "archived"
     assert update_a.json()["next_action"] == "next week retest"
+    assert set(update_a.json()["tags"]) == {"trend", "timing"}
 
     delete_b = app_client.delete(f"/api/knowledge-items/{item_b['id']}")
     assert delete_b.status_code == 200, delete_b.text
