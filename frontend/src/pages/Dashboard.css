@@ -1,0 +1,36 @@
+.analytics-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.analytics-header {
+  border: 1px solid #e8edf3;
+  border-radius: 10px;
+  background: linear-gradient(165deg, #fff 0%, #f7fafc 100%);
+  padding: 14px 16px;
+}
+
+.analytics-filter-card {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.analytics-filter-card .ant-card-body {
+  padding: 12px 14px;
+}
+
+.analytics-kpi-card .ant-statistic-title {
+  min-height: 22px;
+}
+
+.analytics-chart-box {
+  width: 100%;
+}
+
+.analytics-note-list {
+  color: #555;
+  font-size: 13px;
+  line-height: 1.75;
+}

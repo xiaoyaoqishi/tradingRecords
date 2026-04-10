@@ -20,6 +20,7 @@ export const tradeApi = {
   update: (id, data) => api.put(`/trades/${id}`, data),
   delete: (id) => api.delete(`/trades/${id}`),
   stats: (params) => api.get('/trades/statistics', { params }),
+  analytics: (params) => api.get('/trades/analytics', { params }),
   importPaste: (data) => api.post('/trades/import-paste', data),
   positions: (params) => api.get('/trades/positions', { params }),
   sources: () => api.get('/trades/sources'),

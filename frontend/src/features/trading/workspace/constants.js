@@ -38,10 +38,6 @@ export function normalizeText(val) {
   return trimmed || null;
 }
 
-export function taxonomyOptions(arr = []) {
-  return arr.map((v) => ({ label: v, value: v }));
-}
-
 export function parseSourceFallbackFromNotes(notes = '') {
   const text = String(notes || '');
   const mBroker = text.match(/来源券商:\s*([^|]+)/);

@@ -15,7 +15,7 @@ import {
 } from 'antd';
 import { ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { formatFuturesSymbol } from '../../../utils/futures';
-import { taxonomyOptions } from './constants';
+import { taxonomyOptionsWithZh } from '../localization';
 
 const { TextArea } = Input;
 
@@ -93,46 +93,46 @@ export default function TradeDetailDrawer({
             <Row gutter={12}>
               <Col span={12}>
                 <Typography.Text type="secondary">机会结构</Typography.Text>
-                <Select
-                  value={review.opportunity_structure || undefined}
-                  allowClear
-                  options={taxonomyOptions(reviewTaxonomy.opportunity_structure)}
-                  onChange={(v) => onChangeReview('opportunity_structure', v || '')}
-                  placeholder="选择机会结构"
-                  style={{ width: '100%' }}
+                  <Select
+                    value={review.opportunity_structure || undefined}
+                    allowClear
+                    options={taxonomyOptionsWithZh('opportunity_structure', reviewTaxonomy.opportunity_structure)}
+                    onChange={(v) => onChangeReview('opportunity_structure', v || '')}
+                    placeholder="选择机会结构"
+                    style={{ width: '100%' }}
                 />
               </Col>
               <Col span={12}>
                 <Typography.Text type="secondary">优势来源</Typography.Text>
-                <Select
-                  value={review.edge_source || undefined}
-                  allowClear
-                  options={taxonomyOptions(reviewTaxonomy.edge_source)}
-                  onChange={(v) => onChangeReview('edge_source', v || '')}
-                  placeholder="选择优势来源"
-                  style={{ width: '100%' }}
+                  <Select
+                    value={review.edge_source || undefined}
+                    allowClear
+                    options={taxonomyOptionsWithZh('edge_source', reviewTaxonomy.edge_source)}
+                    onChange={(v) => onChangeReview('edge_source', v || '')}
+                    placeholder="选择优势来源"
+                    style={{ width: '100%' }}
                 />
               </Col>
               <Col span={12}>
                 <Typography.Text type="secondary">失败类型</Typography.Text>
-                <Select
-                  value={review.failure_type || undefined}
-                  allowClear
-                  options={taxonomyOptions(reviewTaxonomy.failure_type)}
-                  onChange={(v) => onChangeReview('failure_type', v || '')}
-                  placeholder="选择失败类型"
-                  style={{ width: '100%' }}
+                  <Select
+                    value={review.failure_type || undefined}
+                    allowClear
+                    options={taxonomyOptionsWithZh('failure_type', reviewTaxonomy.failure_type)}
+                    onChange={(v) => onChangeReview('failure_type', v || '')}
+                    placeholder="选择失败类型"
+                    style={{ width: '100%' }}
                 />
               </Col>
               <Col span={12}>
                 <Typography.Text type="secondary">复盘结论</Typography.Text>
-                <Select
-                  value={review.review_conclusion || undefined}
-                  allowClear
-                  options={taxonomyOptions(reviewTaxonomy.review_conclusion)}
-                  onChange={(v) => onChangeReview('review_conclusion', v || '')}
-                  placeholder="选择复盘结论"
-                  style={{ width: '100%' }}
+                  <Select
+                    value={review.review_conclusion || undefined}
+                    allowClear
+                    options={taxonomyOptionsWithZh('review_conclusion', reviewTaxonomy.review_conclusion)}
+                    onChange={(v) => onChangeReview('review_conclusion', v || '')}
+                    placeholder="选择复盘结论"
+                    style={{ width: '100%' }}
                 />
               </Col>
               <Col span={24}>

@@ -84,6 +84,11 @@ Changed files:
 - 不移除 notes 兼容路径
 - 不触碰交易子系统外模块
 
+## Related Sprint Notes
+
+- Analytics + localization sprint文档见：
+  - `docs/trading-analytics-localization.md`
+
 ## Next safe step
 
 1. 为 metadata 字段补充更细粒度校验与审计字段（仍保持可选与兼容）。

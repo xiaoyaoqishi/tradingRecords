@@ -6,6 +6,7 @@ import {
 import { SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { tradeApi, tradeReviewApi, tradeSourceApi } from '../api';
+import { taxonomyOptionsWithZh } from '../features/trading/localization';
 import dayjs from 'dayjs';
 
 const { TextArea } = Input;
@@ -354,7 +355,7 @@ export default function TradeForm() {
             <Form.Item label="机会结构" name="opportunity_structure">
               <Select
                 allowClear
-                options={opt(reviewTaxonomy.opportunity_structure)}
+                options={taxonomyOptionsWithZh('opportunity_structure', reviewTaxonomy.opportunity_structure)}
                 placeholder="选择机会结构"
               />
             </Form.Item>
@@ -363,7 +364,7 @@ export default function TradeForm() {
             <Form.Item label="优势来源" name="edge_source">
               <Select
                 allowClear
-                options={opt(reviewTaxonomy.edge_source)}
+                options={taxonomyOptionsWithZh('edge_source', reviewTaxonomy.edge_source)}
                 placeholder="选择优势来源"
               />
             </Form.Item>
@@ -372,7 +373,7 @@ export default function TradeForm() {
             <Form.Item label="失败类型" name="failure_type">
               <Select
                 allowClear
-                options={opt(reviewTaxonomy.failure_type)}
+                options={taxonomyOptionsWithZh('failure_type', reviewTaxonomy.failure_type)}
                 placeholder="选择失败类型"
               />
             </Form.Item>
@@ -381,7 +382,7 @@ export default function TradeForm() {
             <Form.Item label="复盘结论" name="review_conclusion">
               <Select
                 allowClear
-                options={opt(reviewTaxonomy.review_conclusion)}
+                options={taxonomyOptionsWithZh('review_conclusion', reviewTaxonomy.review_conclusion)}
                 placeholder="选择复盘结论"
               />
             </Form.Item>
