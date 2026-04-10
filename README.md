@@ -78,8 +78,14 @@
 | 行为纪律层 | 亏损归因 | 是否计划内、追单、扛单、重仓、报复性交易 |
 | 标签与复盘层 | 如何改进 | 13 种错误标签、复盘一句话 |
 
+- 左侧导航顺序：记录 → 仪表盘 → 信息维护 → 复盘（隐藏侧栏“新建”入口）
 - 可视化仪表盘：胜率、盈亏曲线、品种分布、策略统计、错误标签排行
-- 交易列表：分页、筛选、排序、行内操作
+- 仪表盘支持按品种、券商/来源筛选
+- 交易列表：分页、筛选、排序、行内操作、批量勾选删除/修改
+- 交易列表显示“券商/来源”列，支持按券商/来源筛选
+- 粘贴导入支持自定义券商名称（不再固定选项）
+- 当前持仓视图支持按品种、来源筛选
+- 信息维护子模块：券商信息维护（名称、账号、密码、其他信息、备注）
 - 三级复盘：日/周/月维度结构化复盘
 - 多品种支持：期货、加密货币、股票、外汇
 
@@ -190,7 +196,7 @@ program/
 ├── backend/                         # FastAPI 后端
 │   ├── requirements.txt             # fastapi, uvicorn, sqlalchemy, pydantic, python-multipart, psutil
 │   ├── database.py                  # 数据库连接与会话
-│   ├── models.py                    # ORM 模型 (Trade, Review, Notebook, Note, TodoItem, NewsIssue)
+│   ├── models.py                    # ORM 模型 (Trade, Review, Notebook, Note, TodoItem, NewsIssue, TradeBroker)
 │   ├── schemas.py                   # Pydantic 请求/响应模型
 │   ├── auth.py                      # HMAC 签名会话认证
 │   ├── main.py                      # 应用入口、中间件、全部 API 路由 + 监控采集线程
@@ -209,7 +215,9 @@ program/
 │   └── src/
 │       ├── App.jsx                  # 路由与布局（含返回首页按钮）
 │       ├── api/index.js             # Axios + 401 拦截跳转登录
-│       └── pages/                   # Dashboard, TradeList, TradeForm, ReviewList
+│       ├── utils/
+│       │   └── futures.js           # 期货品种代码/名称映射
+│       └── pages/                   # Dashboard, TradeList, TradeForm, ReviewList, BrokerManage(信息维护)
 │
 ├── frontend-notes/                  # 知识笔记前端 (/notes/)
 │   ├── package.json                 # antd, tiptap, lunar-javascript, dayjs...
@@ -370,12 +378,25 @@ curl -X POST http://127.0.0.1:8000/api/auth/setup \
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/trades` | 交易列表（分页、多字段筛选） |
+| GET | `/api/trades` | 交易列表（分页、多字段筛选，支持 `source_keyword`） |
+| GET | `/api/trades/count` | 交易总数（与列表同筛选条件） |
 | POST | `/api/trades` | 创建交易 |
 | GET | `/api/trades/{id}` | 获取单笔 |
 | PUT | `/api/trades/{id}` | 更新交易 |
 | DELETE | `/api/trades/{id}` | 删除交易 |
-| GET | `/api/trades/statistics` | 统计分析（胜率、盈亏、品种/策略/错误分布） |
+| GET | `/api/trades/statistics` | 统计分析（支持 `symbol`、`source_keyword`） |
+| POST | `/api/trades/import-paste` | 粘贴导入期货日结单 |
+| GET | `/api/trades/positions` | 当前持仓（支持 `symbol`、`source_keyword`） |
+| GET | `/api/trades/sources` | 获取动态来源列表（券商/历史导入来源） |
+
+### 信息维护（交易）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/trade-brokers` | 券商信息列表 |
+| POST | `/api/trade-brokers` | 新增券商信息 |
+| PUT | `/api/trade-brokers/{id}` | 更新券商信息 |
+| DELETE | `/api/trade-brokers/{id}` | 删除券商信息 |
 
 ### 复盘
 
