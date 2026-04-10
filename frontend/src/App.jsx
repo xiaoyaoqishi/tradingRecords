@@ -2,19 +2,20 @@ import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-do
 import {
   DashboardOutlined,
   OrderedListOutlined,
-  FormOutlined,
   FileTextOutlined,
   LogoutOutlined,
+  BankOutlined,
 } from '@ant-design/icons';
 import Dashboard from './pages/Dashboard';
 import TradeList from './pages/TradeList';
 import TradeForm from './pages/TradeForm';
 import ReviewList from './pages/ReviewList';
+import InfoMaintain from './pages/BrokerManage';
 
 const tabs = [
-  { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
   { key: '/trades', icon: <OrderedListOutlined />, label: '记录' },
-  { key: '/trades/new', icon: <FormOutlined />, label: '新建' },
+  { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
+  { key: '/maintain', icon: <BankOutlined />, label: '信息维护' },
   { key: '/reviews', icon: <FileTextOutlined />, label: '复盘' },
 ];
 
@@ -61,6 +62,7 @@ function AppLayout() {
           <Route path="/trades" element={<TradeList />} />
           <Route path="/trades/new" element={<TradeForm />} />
           <Route path="/trades/:id/edit" element={<TradeForm />} />
+          <Route path="/maintain" element={<InfoMaintain />} />
           <Route path="/reviews" element={<ReviewList />} />
         </Routes>
       </div>

@@ -205,3 +205,17 @@ class NewsIssue(Base):
     content_zh = Column(Text, default="")
     status = Column(String(30), default="downloaded")
     translated_at = Column(DateTime, nullable=True)
+
+
+class TradeBroker(Base):
+    __tablename__ = "trade_brokers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    name = Column(String(100), nullable=False, unique=True)
+    account = Column(String(100), nullable=True)
+    password = Column(String(200), nullable=True)
+    extra_info = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)

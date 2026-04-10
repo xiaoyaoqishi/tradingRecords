@@ -142,6 +142,58 @@ class TradeResponse(TradeCreate):
         from_attributes = True
 
 
+class TradePasteImportRequest(BaseModel):
+    raw_text: str
+    broker: Optional[str] = None
+
+
+class TradePasteImportError(BaseModel):
+    row: int
+    reason: str
+    raw: Optional[str] = None
+
+
+class TradePasteImportResponse(BaseModel):
+    inserted: int
+    skipped: int
+    errors: List[TradePasteImportError] = []
+
+
+class TradePositionResponse(BaseModel):
+    symbol: str
+    contract: Optional[str] = None
+    net_quantity: float
+    side: str
+    avg_open_price: float
+    open_since: Optional[date] = None
+    last_trade_date: Optional[date] = None
+
+
+class TradeBrokerCreate(BaseModel):
+    name: str
+    account: Optional[str] = None
+    password: Optional[str] = None
+    extra_info: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TradeBrokerUpdate(BaseModel):
+    name: Optional[str] = None
+    account: Optional[str] = None
+    password: Optional[str] = None
+    extra_info: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TradeBrokerResponse(TradeBrokerCreate):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class ReviewCreate(BaseModel):
     review_type: str
     review_date: date

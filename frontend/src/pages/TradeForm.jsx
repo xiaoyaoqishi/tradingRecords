@@ -95,7 +95,7 @@ export default function TradeForm() {
           </Col>
           <Col span={6}><Form.Item label="开仓价" name="open_price" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
           <Col span={6}><Form.Item label="平仓价" name="close_price"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
-          <Col span={6}><Form.Item label="数量/手数" name="quantity" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
+          <Col span={6}><Form.Item label="手数" name="quantity" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
           <Col span={6}><Form.Item label="保证金" name="margin"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
           <Col span={6}><Form.Item label="手续费" name="commission"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
           <Col span={6}><Form.Item label="滑点" name="slippage"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>

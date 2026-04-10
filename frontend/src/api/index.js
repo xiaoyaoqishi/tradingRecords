@@ -14,11 +14,22 @@ api.interceptors.response.use(
 
 export const tradeApi = {
   list: (params) => api.get('/trades', { params }),
+  count: (params) => api.get('/trades/count', { params }),
   get: (id) => api.get(`/trades/${id}`),
   create: (data) => api.post('/trades', data),
   update: (id, data) => api.put(`/trades/${id}`, data),
   delete: (id) => api.delete(`/trades/${id}`),
   stats: (params) => api.get('/trades/statistics', { params }),
+  importPaste: (data) => api.post('/trades/import-paste', data),
+  positions: (params) => api.get('/trades/positions', { params }),
+  sources: () => api.get('/trades/sources'),
+};
+
+export const brokerApi = {
+  list: () => api.get('/trade-brokers'),
+  create: (data) => api.post('/trade-brokers', data),
+  update: (id, data) => api.put(`/trade-brokers/${id}`, data),
+  delete: (id) => api.delete(`/trade-brokers/${id}`),
 };
 
 export const reviewApi = {

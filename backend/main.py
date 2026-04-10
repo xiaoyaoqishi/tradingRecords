@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text
-from typing import Optional, List
+from sqlalchemy import text, func, or_
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 import json
 import os
@@ -18,7 +18,7 @@ import hashlib
 import xml.etree.ElementTree as ET
 import random
 from pathlib import Path
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 from collections import deque
@@ -32,9 +32,11 @@ from bs4 import BeautifulSoup
 DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
 
 from database import engine, get_db, Base, SessionLocal
-from models import Trade, Review, Notebook, Note, NoteLink, TodoItem, NewsIssue
+from models import Trade, Review, Notebook, Note, NoteLink, TodoItem, NewsIssue, TradeBroker
 from schemas import (
     TradeCreate, TradeUpdate, TradeResponse,
+    TradePasteImportRequest, TradePasteImportResponse, TradePasteImportError, TradePositionResponse,
+    TradeBrokerCreate, TradeBrokerUpdate, TradeBrokerResponse,
     ReviewCreate, ReviewUpdate, ReviewResponse,
     NotebookCreate, NotebookUpdate, NotebookResponse,
     NoteCreate, NoteUpdate, NoteResponse,
@@ -204,6 +206,494 @@ def get_upload(filename: str):
 
 # ── Trade ──
 
+PASTE_TRADE_HEADERS = [
+    "交易日期", "合约", "买/卖", "投机（一般）/套保/套利", "成交价",
+    "手数", "成交额", "开/平", "手续费", "平仓盈亏",
+]
+
+
+def _normalize_contract_symbol(contract: str) -> str:
+    c = (contract or "").strip()
+    m = re.match(r"([A-Za-z]+)", c)
+    if m:
+        return m.group(1).upper()
+    return c
+
+
+def _parse_cn_date(value: str) -> date:
+    s = str(value or "").strip()
+    if not s:
+        raise ValueError("交易日期为空")
+    if re.fullmatch(r"\d+(\.\d+)?", s):
+        n = float(s)
+        # Excel serial date (1900 date system)
+        if n > 20000:
+            return date(1899, 12, 30) + timedelta(days=int(n))
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"无法识别交易日期: {s}")
+
+
+def _parse_float(value: str, field: str) -> float:
+    s = str(value or "").replace("\xa0", " ").strip().replace(",", "")
+    if s in {"", "-", "--", "—", "——", "null", "None"}:
+        return 0.0
+    try:
+        return float(s)
+    except Exception as exc:
+        raise ValueError(f"{field}格式错误: {value}") from exc
+
+
+def _map_direction(v: str) -> str:
+    s = str(v or "").replace("\xa0", " ").strip()
+    if s in {"买", "买入", "多", "做多"}:
+        return "做多"
+    if s in {"卖", "卖出", "空", "做空"}:
+        return "做空"
+    raise ValueError(f"买/卖无法识别: {v}")
+
+
+def _map_open_close(v: str) -> str:
+    s = str(v or "").replace("\xa0", " ").strip()
+    if "平" in s:
+        return "closed"
+    if "开" in s:
+        return "open"
+    raise ValueError(f"开/平无法识别: {v}")
+
+
+def _parse_paste_row(cells: List[str], broker: Optional[str]) -> Trade:
+    if len(cells) < 10:
+        raise ValueError("列数不足，期望10列")
+    trade_day = _parse_cn_date(cells[0])
+    contract = str(cells[1] or "").strip()
+    if not contract:
+        raise ValueError("合约为空")
+    direction = _map_direction(cells[2])
+    category = str(cells[3] or "").strip() or None
+    open_price = _parse_float(cells[4], "成交价")
+    quantity = _parse_float(cells[5], "手数")
+    if quantity <= 0:
+        raise ValueError("手数必须大于0")
+    _turnover = _parse_float(cells[6], "成交额")
+    status = _map_open_close(cells[7])
+    commission = _parse_float(cells[8], "手续费")
+    pnl = _parse_float(cells[9], "平仓盈亏")
+    open_time = datetime.combine(trade_day, datetime.min.time()).replace(hour=9, minute=0, second=0)
+    close_time = None
+    close_price = None
+    if status == "closed":
+        close_time = datetime.combine(trade_day, datetime.min.time()).replace(hour=15, minute=0, second=0)
+        close_price = open_price
+    note_parts = []
+    if broker:
+        note_parts.append(f"来源券商: {broker}")
+    note_parts.append("来源: 日结单粘贴导入")
+    return Trade(
+        trade_date=trade_day,
+        instrument_type="期货",
+        symbol=_normalize_contract_symbol(contract),
+        contract=contract,
+        category=category,
+        direction=direction,
+        open_time=open_time,
+        close_time=close_time,
+        open_price=open_price,
+        close_price=close_price,
+        quantity=quantity,
+        commission=commission,
+        pnl=pnl,
+        status=status,
+        notes=" | ".join(note_parts),
+    )
+
+
+def _position_side(direction: str, status: str) -> str:
+    # 开仓: 买开->做多, 卖开->做空
+    # 平仓: 买平->平空(做空持仓), 卖平->平多(做多持仓)
+    if status == "open":
+        return "做多" if direction == "做多" else "做空"
+    return "做空" if direction == "做多" else "做多"
+
+
+def _state_key(symbol: str, side: str) -> str:
+    return f"{symbol}::{side}"
+
+
+def _state_key_contract(symbol: str, contract: Optional[str], side: str) -> str:
+    c = re.sub(r"\s+", "", (contract or "").strip()).upper()
+    return f"{symbol}::{c}::{side}"
+
+
+def _ensure_symbol_state(
+    state: Dict[str, Dict[str, Any]],
+    symbol: str,
+    side: str,
+    contract: Optional[str],
+    trade_day: date,
+):
+    key = _state_key(symbol, side)
+    if key not in state:
+        state[key] = {
+            "symbol": symbol,
+            "side": side,
+            "contract": contract,
+            "quantity": 0.0,
+            "avg_open_price": 0.0,
+            "open_since": None,
+            "last_trade_date": trade_day,
+        }
+    st = state[key]
+    if contract:
+        st["contract"] = contract
+    st["last_trade_date"] = trade_day
+    return st
+
+
+def _apply_fill_to_state(state: Dict[str, Dict[str, Any]], fill: Trade):
+    symbol = _normalize_contract_symbol(fill.contract or fill.symbol or "")
+    side = _position_side(fill.direction, fill.status)
+    st = _ensure_symbol_state(state, symbol, side, fill.contract, fill.trade_date)
+    qty = float(fill.quantity or 0)
+    if qty <= 0:
+        raise ValueError("手数必须大于0")
+    prev_qty = float(st["quantity"])
+
+    if fill.status == "closed":
+        # 平仓必须能匹配到对应方向持仓，且不能超平
+        if prev_qty <= 0:
+            raise ValueError(f"{symbol} {side} 平仓失败：当前无对应持仓")
+        if qty - prev_qty > 1e-9:
+            raise ValueError(f"{symbol} {side} 平仓手数超出持仓")
+        remain = prev_qty - qty
+        st["quantity"] = remain if remain > 1e-9 else 0.0
+        if st["quantity"] <= 0:
+            st["avg_open_price"] = 0.0
+            st["open_since"] = None
+        return
+
+    # 开仓：同方向加权均价
+    next_qty = prev_qty + qty
+    prev_cost = float(st["avg_open_price"]) * prev_qty
+    st["avg_open_price"] = (prev_cost + fill.open_price * qty) / next_qty
+    st["quantity"] = next_qty
+    if st["open_since"] is None:
+        st["open_since"] = fill.trade_date
+
+
+def _build_position_state_from_db(db: Session, source_keyword: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    state: Dict[str, Dict[str, Any]] = {}
+    q = db.query(Trade).filter(Trade.instrument_type == "期货", Trade.status == "open")
+    if source_keyword:
+        q = q.filter(Trade.notes.contains(source_keyword))
+    rows = q.order_by(Trade.open_time.asc(), Trade.id.asc()).all()
+    for t in rows:
+        symbol = _normalize_contract_symbol(t.contract or t.symbol or "")
+        side = t.direction
+        st = _ensure_symbol_state(state, symbol, side, t.contract, t.trade_date)
+        prev_qty = float(st["quantity"])
+        add_qty = float(t.quantity or 0)
+        if add_qty <= 0:
+            continue
+        total_qty = prev_qty + add_qty
+        prev_cost = float(st["avg_open_price"]) * prev_qty
+        st["avg_open_price"] = (prev_cost + float(t.open_price or 0) * add_qty) / total_qty
+        st["quantity"] = total_qty
+        if st["open_since"] is None:
+            st["open_since"] = t.trade_date
+        if t.open_time and (st["last_trade_date"] is None or t.trade_date >= st["last_trade_date"]):
+            st["last_trade_date"] = t.trade_date
+    return state
+
+
+def _append_note(base: Optional[str], extra: str) -> str:
+    b = (base or "").strip()
+    if not b:
+        return extra
+    return f"{b} | {extra}"
+
+
+def _copy_trade_for_closed_part(src: Trade, close_qty: float, close_price: float, close_time: datetime, close_commission: float, close_pnl: float) -> Trade:
+    open_commission_part = (float(src.commission or 0) * close_qty / float(src.quantity or 1))
+    return Trade(
+        trade_date=src.trade_date,
+        instrument_type=src.instrument_type,
+        symbol=src.symbol,
+        contract=src.contract,
+        category=src.category,
+        direction=src.direction,
+        open_time=src.open_time,
+        close_time=close_time,
+        open_price=src.open_price,
+        close_price=close_price,
+        quantity=close_qty,
+        margin=src.margin,
+        commission=round(open_commission_part + close_commission, 6),
+        slippage=src.slippage,
+        pnl=round(close_pnl, 6),
+        pnl_points=src.pnl_points,
+        holding_duration=src.holding_duration,
+        is_overnight=src.is_overnight,
+        trading_session=src.trading_session,
+        status="closed",
+        is_main_contract=src.is_main_contract,
+        is_near_delivery=src.is_near_delivery,
+        is_contract_switch=src.is_contract_switch,
+        is_high_volatility=src.is_high_volatility,
+        is_near_data_release=src.is_near_data_release,
+        entry_logic=src.entry_logic,
+        exit_logic=src.exit_logic,
+        strategy_type=src.strategy_type,
+        market_condition=src.market_condition,
+        timeframe=src.timeframe,
+        core_signal=src.core_signal,
+        stop_loss_plan=src.stop_loss_plan,
+        target_plan=src.target_plan,
+        followed_plan=src.followed_plan,
+        is_planned=src.is_planned,
+        is_impulsive=src.is_impulsive,
+        is_chasing=src.is_chasing,
+        is_holding_loss=src.is_holding_loss,
+        is_early_profit=src.is_early_profit,
+        is_extended_stop=src.is_extended_stop,
+        is_overweight=src.is_overweight,
+        is_revenge=src.is_revenge,
+        is_emotional=src.is_emotional,
+        mental_state=src.mental_state,
+        physical_state=src.physical_state,
+        pre_opportunity=src.pre_opportunity,
+        pre_win_reason=src.pre_win_reason,
+        pre_risk=src.pre_risk,
+        during_match_expectation=src.during_match_expectation,
+        during_plan_changed=src.during_plan_changed,
+        post_quality=src.post_quality,
+        post_repeat=src.post_repeat,
+        post_root_cause=src.post_root_cause,
+        post_replicable=src.post_replicable,
+        error_tags=src.error_tags,
+        review_note=src.review_note,
+        notes=_append_note(src.notes, "来源: 自动平仓拆分"),
+    )
+
+
+def _apply_close_fill_to_db(db: Session, fill: Trade, broker: Optional[str] = None):
+    # SessionLocal 默认 autoflush=False，导入时会连续多次查询 open 持仓。
+    # 这里先 flush，确保前一次平仓变更（status/quantity）对本次匹配可见。
+    db.flush()
+    symbol = _normalize_contract_symbol(fill.contract or fill.symbol or "")
+    contract_norm = re.sub(r"\s+", "", (fill.contract or "").strip()).upper()
+    close_side = _position_side(fill.direction, "closed")
+    close_time = fill.close_time or datetime.combine(fill.trade_date, datetime.min.time()).replace(hour=15)
+    q = db.query(Trade).filter(
+        Trade.instrument_type == "期货",
+        Trade.symbol == symbol,
+        Trade.direction == close_side,
+        Trade.status == "open",
+        Trade.trade_date <= fill.trade_date,
+        or_(Trade.open_time.is_(None), Trade.open_time <= close_time),
+    )
+    if contract_norm:
+        q = q.filter(func.upper(func.replace(func.trim(Trade.contract), " ", "")) == contract_norm)
+    if broker:
+        q = q.filter(Trade.notes.contains(f"来源券商: {broker}"))
+    open_rows = q.order_by(Trade.open_time.asc(), Trade.id.asc()).all()
+    remaining = float(fill.quantity or 0)
+    if remaining <= 0:
+        raise ValueError("平仓手数必须大于0")
+    total_open = sum(float(x.quantity or 0) for x in open_rows)
+    if total_open + 1e-9 < remaining:
+        raise ValueError(f"{symbol} {close_side} 平仓失败：可匹配持仓不足（平仓时间早于对应开仓时间）")
+
+    close_price = float(fill.open_price or 0)
+    close_commission_total = float(fill.commission or 0)
+    close_pnl_total = float(fill.pnl or 0)
+    close_qty_total = float(fill.quantity or 1)
+
+    for row in open_rows:
+        if remaining <= 1e-9:
+            break
+        row_qty = float(row.quantity or 0)
+        if row_qty <= 0:
+            continue
+        take = min(row_qty, remaining)
+        ratio = take / close_qty_total
+        close_commission_part = close_commission_total * ratio
+        close_pnl_part = close_pnl_total * ratio
+
+        if abs(take - row_qty) <= 1e-9:
+            row.status = "closed"
+            row.close_price = close_price
+            row.close_time = close_time
+            row.pnl = round(close_pnl_part, 6)
+            row.commission = round(float(row.commission or 0) + close_commission_part, 6)
+            row.notes = _append_note(row.notes, "来源: 自动平仓匹配")
+        else:
+            remaining_qty = row_qty - take
+            closed_row = _copy_trade_for_closed_part(
+                row,
+                close_qty=take,
+                close_price=close_price,
+                close_time=close_time,
+                close_commission=close_commission_part,
+                close_pnl=close_pnl_part,
+            )
+            db.add(closed_row)
+            open_commission_total = float(row.commission or 0)
+            row.quantity = round(remaining_qty, 6)
+            row.commission = round(open_commission_total * (remaining_qty / row_qty), 6)
+            row.notes = _append_note(row.notes, "部分平仓后自动拆分")
+        remaining -= take
+
+
+@app.post("/api/trades/import-paste", response_model=TradePasteImportResponse)
+def import_trades_from_paste(payload: TradePasteImportRequest, db: Session = Depends(get_db)):
+    text = (payload.raw_text or "").strip()
+    if not text:
+        raise HTTPException(400, "请粘贴交易数据")
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        raise HTTPException(400, "粘贴内容为空")
+
+    inserted = 0
+    skipped = 0
+    errors: List[TradePasteImportError] = []
+    start_idx = 0
+
+    first_cells = [c.strip() for c in lines[0].split("\t")]
+    if all(h in first_cells for h in PASTE_TRADE_HEADERS):
+        start_idx = 1
+
+    # 1) 先解析并去重
+    parsed_rows: List[Dict[str, Any]] = []
+    for idx, raw in enumerate(lines[start_idx:], start=start_idx + 1):
+        try:
+            cells = [c.replace("\xa0", " ").strip() for c in raw.split("\t")]
+            trade_obj = _parse_paste_row(cells, payload.broker)
+            # 开仓行做去重；平仓行必须参与冲销，不能因历史“独立平仓记录”被跳过
+            if trade_obj.status == "open":
+                q_exist = db.query(Trade).filter(
+                    Trade.trade_date == trade_obj.trade_date,
+                    Trade.contract == trade_obj.contract,
+                    Trade.direction == trade_obj.direction,
+                    Trade.open_price == trade_obj.open_price,
+                    Trade.quantity == trade_obj.quantity,
+                    Trade.status == trade_obj.status,
+                    Trade.commission == trade_obj.commission,
+                    Trade.pnl == trade_obj.pnl,
+                )
+                if payload.broker:
+                    q_exist = q_exist.filter(Trade.notes.contains(f"来源券商: {payload.broker}"))
+                existed = q_exist.first()
+                if existed:
+                    skipped += 1
+                    continue
+            parsed_rows.append({"row": idx, "raw": raw, "trade": trade_obj})
+        except Exception as exc:
+            errors.append(TradePasteImportError(row=idx, reason=str(exc), raw=raw[:300]))
+
+    # 2) 顺序无关校验：平仓先匹配历史持仓，再匹配本次粘贴开仓
+    hist_pool: Dict[str, float] = {}
+    q_hist = db.query(Trade).filter(Trade.instrument_type == "期货", Trade.status == "open")
+    if payload.broker:
+        q_hist = q_hist.filter(Trade.notes.contains(f"来源券商: {payload.broker}"))
+    for t in q_hist.all():
+        k = _state_key_contract(t.symbol, t.contract, t.direction)
+        hist_pool[k] = hist_pool.get(k, 0.0) + float(t.quantity or 0)
+
+    batch_open_pool: Dict[str, float] = {}
+    for item in parsed_rows:
+        t: Trade = item["trade"]
+        if t.status != "open":
+            continue
+        k = _state_key_contract(t.symbol, t.contract, t.direction)
+        batch_open_pool[k] = batch_open_pool.get(k, 0.0) + float(t.quantity or 0)
+
+    valid_rows: List[Dict[str, Any]] = []
+    for item in parsed_rows:
+        t: Trade = item["trade"]
+        if t.status == "open":
+            valid_rows.append(item)
+            continue
+        symbol = _normalize_contract_symbol(t.contract or t.symbol or "")
+        side = _position_side(t.direction, "closed")
+        k = _state_key_contract(symbol, t.contract, side)
+        need = float(t.quantity or 0)
+        if need <= 0:
+            errors.append(TradePasteImportError(row=item["row"], reason="平仓手数必须大于0", raw=item["raw"][:300]))
+            continue
+        hist_avail = hist_pool.get(k, 0.0)
+        use_hist = min(hist_avail, need)
+        hist_pool[k] = hist_avail - use_hist
+        remain = need - use_hist
+        if remain > 1e-9:
+            batch_avail = batch_open_pool.get(k, 0.0)
+            use_batch = min(batch_avail, remain)
+            batch_open_pool[k] = batch_avail - use_batch
+            remain -= use_batch
+        if remain > 1e-9:
+            errors.append(
+                TradePasteImportError(
+                    row=item["row"],
+                    reason=f"{symbol} {side} 平仓失败：历史与本次粘贴均无足够对应开仓",
+                    raw=item["raw"][:300],
+                )
+            )
+            continue
+        valid_rows.append(item)
+
+    # 3) 入库：先开仓，后平仓（确保平仓可匹配到本次导入开仓）
+    open_rows = [x for x in valid_rows if x["trade"].status == "open"]
+    close_rows = [x for x in valid_rows if x["trade"].status == "closed"]
+    open_rows.sort(key=lambda x: (x["trade"].trade_date, x["row"]))
+    close_rows.sort(key=lambda x: (x["trade"].trade_date, x["row"]))
+
+    for item in open_rows:
+        db.add(item["trade"])
+        inserted += 1
+    db.flush()
+
+    for item in close_rows:
+        try:
+            _apply_close_fill_to_db(db, item["trade"], broker=payload.broker)
+            inserted += 1
+        except Exception as exc:
+            errors.append(TradePasteImportError(row=item["row"], reason=str(exc), raw=item["raw"][:300]))
+
+    db.commit()
+    return TradePasteImportResponse(inserted=inserted, skipped=skipped, errors=errors[:100])
+
+
+@app.get("/api/trades/positions", response_model=List[TradePositionResponse])
+def list_trade_positions(
+    symbol: Optional[str] = None,
+    source_keyword: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    state = _build_position_state_from_db(db, source_keyword=source_keyword)
+    rows = []
+    for _, st in state.items():
+        qty = float(st.get("quantity") or 0)
+        if qty < 1e-9:
+            continue
+        if symbol and st["symbol"] != symbol:
+            continue
+        rows.append(
+            TradePositionResponse(
+                symbol=st["symbol"],
+                contract=st.get("contract"),
+                net_quantity=round(qty, 6),
+                side=st.get("side") or "做多",
+                avg_open_price=round(float(st.get("avg_open_price") or 0), 4),
+                open_since=st.get("open_since"),
+                last_trade_date=st.get("last_trade_date"),
+            )
+        )
+    rows.sort(key=lambda x: (x.symbol, x.side))
+    return rows
+
 
 @app.get("/api/trades", response_model=List[TradeResponse])
 def list_trades(
@@ -216,6 +706,7 @@ def list_trades(
     direction: Optional[str] = None,
     status: Optional[str] = None,
     strategy_type: Optional[str] = None,
+    source_keyword: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(Trade)
@@ -233,7 +724,41 @@ def list_trades(
         q = q.filter(Trade.status == status)
     if strategy_type:
         q = q.filter(Trade.strategy_type == strategy_type)
+    if source_keyword:
+        q = q.filter(Trade.notes.contains(source_keyword))
     return q.order_by(Trade.open_time.desc()).offset((page - 1) * size).limit(size).all()
+
+
+@app.get("/api/trades/count")
+def count_trades(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    instrument_type: Optional[str] = None,
+    symbol: Optional[str] = None,
+    direction: Optional[str] = None,
+    status: Optional[str] = None,
+    strategy_type: Optional[str] = None,
+    source_keyword: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(Trade)
+    if date_from:
+        q = q.filter(Trade.trade_date >= date_from)
+    if date_to:
+        q = q.filter(Trade.trade_date <= date_to)
+    if instrument_type:
+        q = q.filter(Trade.instrument_type == instrument_type)
+    if symbol:
+        q = q.filter(Trade.symbol == symbol)
+    if direction:
+        q = q.filter(Trade.direction == direction)
+    if status:
+        q = q.filter(Trade.status == status)
+    if strategy_type:
+        q = q.filter(Trade.strategy_type == strategy_type)
+    if source_keyword:
+        q = q.filter(Trade.notes.contains(source_keyword))
+    return {"total": q.count()}
 
 
 @app.get("/api/trades/statistics")
@@ -242,6 +767,7 @@ def get_statistics(
     date_to: Optional[str] = None,
     instrument_type: Optional[str] = None,
     symbol: Optional[str] = None,
+    source_keyword: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(Trade).filter(Trade.status == "closed")
@@ -253,6 +779,8 @@ def get_statistics(
         q = q.filter(Trade.instrument_type == instrument_type)
     if symbol:
         q = q.filter(Trade.symbol == symbol)
+    if source_keyword:
+        q = q.filter(Trade.notes.contains(source_keyword))
 
     trades = q.all()
     empty = {
@@ -376,6 +904,85 @@ def delete_trade(trade_id: int, db: Session = Depends(get_db)):
     if not t:
         raise HTTPException(404, "Trade not found")
     db.delete(t)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/trades/sources")
+def list_trade_sources(db: Session = Depends(get_db)):
+    values = set()
+    broker_rows = db.query(TradeBroker).order_by(TradeBroker.name.asc()).all()
+    for b in broker_rows:
+        if b.name and b.name.strip():
+            values.add(b.name.strip())
+    note_rows = db.query(Trade.notes).filter(Trade.notes.isnot(None)).all()
+    for (note,) in note_rows:
+        text = str(note or "")
+        m = re.search(r"来源券商:\s*([^|]+)", text)
+        if m and m.group(1).strip():
+            values.add(m.group(1).strip())
+    return {"items": sorted(values)}
+
+
+@app.get("/api/trade-brokers", response_model=List[TradeBrokerResponse])
+def list_trade_brokers(db: Session = Depends(get_db)):
+    return db.query(TradeBroker).order_by(TradeBroker.updated_at.desc(), TradeBroker.id.desc()).all()
+
+
+@app.post("/api/trade-brokers", response_model=TradeBrokerResponse)
+def create_trade_broker(data: TradeBrokerCreate, db: Session = Depends(get_db)):
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(400, "名称不能为空")
+    existed = db.query(TradeBroker).filter(TradeBroker.name == name).first()
+    if existed:
+        raise HTTPException(400, "该名称已存在")
+    obj = TradeBroker(
+        name=name,
+        account=(data.account or "").strip() or None,
+        password=(data.password or "").strip() or None,
+        extra_info=(data.extra_info or "").strip() or None,
+        notes=(data.notes or "").strip() or None,
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@app.put("/api/trade-brokers/{broker_id}", response_model=TradeBrokerResponse)
+def update_trade_broker(broker_id: int, data: TradeBrokerUpdate, db: Session = Depends(get_db)):
+    obj = db.query(TradeBroker).filter(TradeBroker.id == broker_id).first()
+    if not obj:
+        raise HTTPException(404, "券商不存在")
+    payload = data.model_dump(exclude_unset=True)
+    if "name" in payload:
+        new_name = (payload.get("name") or "").strip()
+        if not new_name:
+            raise HTTPException(400, "名称不能为空")
+        existed = db.query(TradeBroker).filter(TradeBroker.name == new_name, TradeBroker.id != broker_id).first()
+        if existed:
+            raise HTTPException(400, "该名称已存在")
+        obj.name = new_name
+    if "account" in payload:
+        obj.account = (payload.get("account") or "").strip() or None
+    if "password" in payload:
+        obj.password = (payload.get("password") or "").strip() or None
+    if "extra_info" in payload:
+        obj.extra_info = (payload.get("extra_info") or "").strip() or None
+    if "notes" in payload:
+        obj.notes = (payload.get("notes") or "").strip() or None
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@app.delete("/api/trade-brokers/{broker_id}")
+def delete_trade_broker(broker_id: int, db: Session = Depends(get_db)):
+    obj = db.query(TradeBroker).filter(TradeBroker.id == broker_id).first()
+    if not obj:
+        raise HTTPException(404, "券商不存在")
+    db.delete(obj)
     db.commit()
     return {"ok": True}
 
