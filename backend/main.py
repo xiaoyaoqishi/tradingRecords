@@ -109,6 +109,12 @@ def _table_exists(db: Session, table: str) -> bool:
     return bool(row)
 
 
+def _ensure_sqlite_column(db: Session, table: str, column: str, ddl_fragment: str):
+    cols = _column_names(db, table)
+    if cols and column not in cols:
+        db.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_fragment}"))
+
+
 def _migrate_legacy_schema():
     db = SessionLocal()
     try:
@@ -153,9 +159,42 @@ def _migrate_legacy_schema():
             db.execute(text("ALTER TABLE trades ADD COLUMN is_favorite BOOLEAN DEFAULT 0"))
         if "star_rating" not in trade_cols:
             db.execute(text("ALTER TABLE trades ADD COLUMN star_rating INTEGER"))
-        trade_plan_cols = _column_names(db, "trade_plans")
-        if trade_plan_cols and "research_notes" not in trade_plan_cols:
-            db.execute(text("ALTER TABLE trade_plans ADD COLUMN research_notes TEXT"))
+        if _table_exists(db, "review_sessions"):
+            _ensure_sqlite_column(db, "review_sessions", "review_kind", "VARCHAR(40) DEFAULT 'custom'")
+            _ensure_sqlite_column(db, "review_sessions", "review_scope", "VARCHAR(40) DEFAULT 'custom'")
+            _ensure_sqlite_column(db, "review_sessions", "selection_mode", "VARCHAR(40) DEFAULT 'manual'")
+            _ensure_sqlite_column(db, "review_sessions", "selection_basis", "TEXT DEFAULT ''")
+            _ensure_sqlite_column(db, "review_sessions", "review_goal", "TEXT DEFAULT ''")
+            _ensure_sqlite_column(db, "review_sessions", "market_regime", "VARCHAR(100)")
+            _ensure_sqlite_column(db, "review_sessions", "summary", "TEXT")
+            _ensure_sqlite_column(db, "review_sessions", "repeated_errors", "TEXT")
+            _ensure_sqlite_column(db, "review_sessions", "next_focus", "TEXT")
+            _ensure_sqlite_column(db, "review_sessions", "action_items", "TEXT")
+            _ensure_sqlite_column(db, "review_sessions", "content", "TEXT")
+            _ensure_sqlite_column(db, "review_sessions", "research_notes", "TEXT")
+            _ensure_sqlite_column(db, "review_sessions", "tags", "TEXT")
+            _ensure_sqlite_column(db, "review_sessions", "filter_snapshot_json", "TEXT")
+            _ensure_sqlite_column(db, "review_sessions", "is_favorite", "BOOLEAN DEFAULT 0")
+            _ensure_sqlite_column(db, "review_sessions", "star_rating", "INTEGER")
+        if _table_exists(db, "trade_plans"):
+            _ensure_sqlite_column(db, "trade_plans", "status", "VARCHAR(20) DEFAULT 'draft'")
+            _ensure_sqlite_column(db, "trade_plans", "symbol", "VARCHAR(50)")
+            _ensure_sqlite_column(db, "trade_plans", "contract", "VARCHAR(50)")
+            _ensure_sqlite_column(db, "trade_plans", "direction_bias", "VARCHAR(20)")
+            _ensure_sqlite_column(db, "trade_plans", "setup_type", "VARCHAR(80)")
+            _ensure_sqlite_column(db, "trade_plans", "market_regime", "VARCHAR(100)")
+            _ensure_sqlite_column(db, "trade_plans", "entry_zone", "TEXT")
+            _ensure_sqlite_column(db, "trade_plans", "stop_loss_plan", "TEXT")
+            _ensure_sqlite_column(db, "trade_plans", "target_plan", "TEXT")
+            _ensure_sqlite_column(db, "trade_plans", "invalid_condition", "TEXT")
+            _ensure_sqlite_column(db, "trade_plans", "thesis", "TEXT")
+            _ensure_sqlite_column(db, "trade_plans", "risk_notes", "TEXT")
+            _ensure_sqlite_column(db, "trade_plans", "execution_checklist", "TEXT")
+            _ensure_sqlite_column(db, "trade_plans", "priority", "VARCHAR(20) DEFAULT 'medium'")
+            _ensure_sqlite_column(db, "trade_plans", "tags", "TEXT")
+            _ensure_sqlite_column(db, "trade_plans", "source_ref", "VARCHAR(200)")
+            _ensure_sqlite_column(db, "trade_plans", "post_result_summary", "TEXT")
+            _ensure_sqlite_column(db, "trade_plans", "research_notes", "TEXT")
         db.commit()
     finally:
         db.close()
