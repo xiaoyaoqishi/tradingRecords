@@ -41,6 +41,7 @@
 
 - 日记与文档分区管理，支持嵌套文件夹。
 - 富文本编辑（TipTap）与图片上传。
+- Read mode markdown code-block rendering uses compact typography for dense technical reading while preserving wikilink/image-lightbox behavior.
 - 全文搜索、双向链接（wikilink/backlink）、日历与历史今日。
 - 待办与回收站为独立工作流。
 
