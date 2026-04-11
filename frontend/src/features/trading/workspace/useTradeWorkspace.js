@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { message } from 'antd';
-import { tradeApi, tradeReviewApi, tradeSourceApi } from '../../../api';
+import dayjs from 'dayjs';
+import { reviewSessionApi, tradeApi, tradePlanApi, tradeReviewApi, tradeSourceApi } from '../../../api';
 import {
   EMPTY_REVIEW,
   EMPTY_REVIEW_TAXONOMY,
@@ -25,6 +26,9 @@ export function useTradeWorkspace() {
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [batchPatch, setBatchPatch] = useState({ status: '', strategy_type: '', is_planned: '', notes: '' });
+  const [batchReviewOpen, setBatchReviewOpen] = useState(false);
+  const [batchReviewSaving, setBatchReviewSaving] = useState(false);
+  const [batchReviewPatch, setBatchReviewPatch] = useState({ ...EMPTY_REVIEW, tags: [] });
 
   const [importOpen, setImportOpen] = useState(false);
   const [importBroker, setImportBroker] = useState('宏源期货');
@@ -354,6 +358,133 @@ export function useTradeWorkspace() {
     return true;
   };
 
+  const openBatchStructuredReview = () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先勾选交易记录');
+      return false;
+    }
+    setBatchReviewPatch({ ...EMPTY_REVIEW, tags: [] });
+    setBatchReviewOpen(true);
+    return true;
+  };
+
+  const handleBatchStructuredReviewSubmit = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先勾选交易记录');
+      return;
+    }
+    const payload = {};
+    REVIEW_FIELD_KEYS.forEach((k) => {
+      payload[k] = normalizeText(batchReviewPatch[k]);
+    });
+    payload.tags = Array.isArray(batchReviewPatch.tags)
+      ? normalizeTagList(batchReviewPatch.tags)
+      : [];
+    const hasReviewData = Object.entries(payload).some(([k, v]) => (k === 'tags' ? (v || []).length > 0 : v !== null));
+    if (!hasReviewData) {
+      message.warning('请至少填写一个结构化复盘字段');
+      return;
+    }
+    setBatchReviewSaving(true);
+    try {
+      await Promise.all(
+        selectedRowKeys.map((tradeId) => tradeReviewApi.upsert(Number(tradeId), payload))
+      );
+      message.success(`已批量保存 ${selectedRowKeys.length} 条结构化复盘`);
+      setBatchReviewOpen(false);
+      await loadTrades();
+    } catch (e) {
+      message.error(e.response?.data?.detail || '批量保存结构化复盘失败');
+    } finally {
+      setBatchReviewSaving(false);
+    }
+  };
+
+  const createReviewSessionFromSelected = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先勾选交易');
+      return null;
+    }
+    try {
+      const payload = {
+        title: `手动多选复盘会话 ${dayjs().format('YYYY-MM-DD HH:mm')}`,
+        review_kind: 'custom',
+        review_scope: 'custom',
+        selection_mode: 'manual',
+        selection_basis: `交易工作台手动多选 ${selectedRowKeys.length} 笔交易`,
+        review_goal: '识别该样本中的重复执行模式与质量偏差',
+        trade_ids: selectedRowKeys.map((x) => Number(x)),
+      };
+      const res = await reviewSessionApi.createFromSelection(payload);
+      message.success('已从多选交易创建复盘会话');
+      return res.data;
+    } catch (e) {
+      message.error(e.response?.data?.detail || '创建复盘会话失败');
+      return null;
+    }
+  };
+
+  const createReviewSessionFromCurrentFilter = async () => {
+    try {
+      const payload = {
+        title: `筛选结果复盘会话 ${dayjs().format('YYYY-MM-DD HH:mm')}`,
+        review_kind: 'theme',
+        review_scope: 'themed',
+        selection_mode: 'filter_snapshot',
+        selection_target: 'full_filtered',
+        selection_basis: '基于当前交易工作台筛选条件生成',
+        review_goal: '评估同一筛选切片下的一致性与边际质量',
+        filter_params: { ...filters },
+      };
+      const res = await reviewSessionApi.createFromSelection(payload);
+      message.success('已从当前筛选结果创建复盘会话');
+      return res.data;
+    } catch (e) {
+      message.error(e.response?.data?.detail || '创建复盘会话失败');
+      return null;
+    }
+  };
+
+  const createTradePlanFromSelected = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先勾选交易');
+      return null;
+    }
+    try {
+      const selectedTrades = trades.filter((x) => selectedRowKeys.includes(x.id));
+      const first = selectedTrades[0] || {};
+      const plan = (
+        await tradePlanApi.create({
+          title: `多选交易计划 ${dayjs().format('MM-DD HH:mm')}`,
+          plan_date: dayjs().format('YYYY-MM-DD'),
+          status: 'draft',
+          symbol: first.symbol || null,
+          contract: first.contract || null,
+          direction_bias: first.direction || null,
+          setup_type: first.strategy_type || null,
+          thesis: '基于交易工作台当前多选样本草拟',
+          trade_links: [],
+        })
+      ).data;
+      await tradePlanApi.upsertTradeLinks(plan.id, {
+        trade_links: selectedRowKeys.map((tradeId, idx) => ({
+          trade_id: Number(tradeId),
+          sort_order: idx,
+          note: null,
+        })),
+      });
+      await Promise.all(
+        selectedRowKeys.map((tradeId) => tradeApi.update(Number(tradeId), { is_planned: true }))
+      );
+      await loadTrades();
+      message.success('已创建并关联交易计划');
+      return plan;
+    } catch (e) {
+      message.error(e.response?.data?.detail || '创建交易计划失败');
+      return null;
+    }
+  };
+
   return {
     // core data
     trades,
@@ -367,6 +498,9 @@ export function useTradeWorkspace() {
     selectedRowKeys,
     batchEditOpen,
     batchPatch,
+    batchReviewOpen,
+    batchReviewSaving,
+    batchReviewPatch,
     // import
     importOpen,
     importLoading,
@@ -399,6 +533,8 @@ export function useTradeWorkspace() {
     setImportOpen,
     setBatchEditOpen,
     setBatchPatch,
+    setBatchReviewOpen,
+    setBatchReviewPatch,
     // actions
     updateFilter,
     setDateRange,
@@ -414,5 +550,11 @@ export function useTradeWorkspace() {
     handleBatchDelete,
     handleBatchEditSubmit,
     openBatchEdit,
+    openBatchStructuredReview,
+    handleBatchStructuredReviewSubmit,
+    createReviewSessionFromSelected,
+    createReviewSessionFromCurrentFilter,
+    createTradePlanFromSelected,
   };
 }
+

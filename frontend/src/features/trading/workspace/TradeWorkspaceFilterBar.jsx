@@ -1,4 +1,4 @@
-import { Button, Card, Col, DatePicker, Popconfirm, Row, Segmented, Select, Space } from 'antd';
+﻿import { Button, Card, Col, DatePicker, Popconfirm, Row, Segmented, Select, Space } from 'antd';
 import { FUTURES_SYMBOL_OPTIONS } from '../../../utils/futures';
 
 const { RangePicker } = DatePicker;
@@ -7,9 +7,12 @@ export default function TradeWorkspaceFilterBar({
   viewMode,
   setViewMode,
   selectedRowKeys,
-  sourceOptions,
   onOpenBatchEdit,
+  onOpenBatchStructuredReview,
   onBatchDelete,
+  onCreateReviewSessionFromSelected,
+  onCreateReviewSessionFromFilter,
+  onCreateTradePlanFromSelected,
   onSetDateRange,
   onUpdateFilter,
 }) {
@@ -26,10 +29,15 @@ export default function TradeWorkspaceFilterBar({
             ]}
           />
         </Col>
+
         {viewMode === 'fills' && (
           <Col>
-            <Space>
+            <Space wrap>
               <Button onClick={onOpenBatchEdit}>批量修改</Button>
+              <Button onClick={onOpenBatchStructuredReview}>多选结构化复盘</Button>
+              <Button onClick={onCreateReviewSessionFromSelected}>多选建复盘会话</Button>
+              <Button onClick={onCreateReviewSessionFromFilter}>筛选结果建复盘会话</Button>
+              <Button onClick={onCreateTradePlanFromSelected}>多选建交易计划</Button>
               <Popconfirm title={`确认删除已勾选的 ${selectedRowKeys.length} 条记录？`} onConfirm={onBatchDelete}>
                 <Button danger>批量删除</Button>
               </Popconfirm>
@@ -37,6 +45,7 @@ export default function TradeWorkspaceFilterBar({
             </Space>
           </Col>
         )}
+
         {viewMode === 'fills' && (
           <Col flex="auto">
             <Space wrap className="trade-filter-controls">
@@ -56,15 +65,6 @@ export default function TradeWorkspaceFilterBar({
                 style={{ width: 170 }}
                 options={FUTURES_SYMBOL_OPTIONS}
                 onChange={(v) => onUpdateFilter('symbol', v)}
-              />
-              <Select
-                placeholder="券商/来源"
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                style={{ width: 190 }}
-                options={sourceOptions}
-                onChange={(v) => onUpdateFilter('source_keyword', v)}
               />
               <Select
                 placeholder="方向"
@@ -130,3 +130,4 @@ export default function TradeWorkspaceFilterBar({
     </Card>
   );
 }
+

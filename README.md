@@ -412,3 +412,12 @@ cd ../frontend-monitor && npm run build
   - strong read-only card rendering
   - read-only zoom via image preview group
 - Favorites and star ratings are visible in list + detail and usable for daily filtering.
+
+## Trading OS Canonical Update (2026-04)
+
+See [docs/trading-os-canonical-model.md](docs/trading-os-canonical-model.md) for the canonical grouped-review and trade-plan architecture:
+- `ReviewSession` as the only canonical grouped-review storage
+- `/api/reviews*` compatibility alias policy
+- `TradeReview` single-trade-only boundary
+- filter-snapshot materialization rules
+- TradePlan status transition model

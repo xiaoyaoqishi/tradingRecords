@@ -8,6 +8,7 @@ import TradePositionsTable from '../features/trading/workspace/TradePositionsTab
 import TradeDetailDrawer from '../features/trading/workspace/TradeDetailDrawer';
 import TradeImportModal from '../features/trading/workspace/TradeImportModal';
 import TradeBatchEditModal from '../features/trading/workspace/TradeBatchEditModal';
+import TradeBatchStructuredReviewModal from '../features/trading/workspace/TradeBatchStructuredReviewModal';
 import { useTradeWorkspace } from '../features/trading/workspace/useTradeWorkspace';
 
 export default function TradeList() {
@@ -22,9 +23,21 @@ export default function TradeList() {
         viewMode={ws.viewMode}
         setViewMode={ws.setViewMode}
         selectedRowKeys={ws.selectedRowKeys}
-        sourceOptions={ws.sourceOptions}
         onOpenBatchEdit={ws.openBatchEdit}
+        onOpenBatchStructuredReview={ws.openBatchStructuredReview}
         onBatchDelete={ws.handleBatchDelete}
+        onCreateReviewSessionFromSelected={async () => {
+          const row = await ws.createReviewSessionFromSelected();
+          if (row?.id) navigate(`/reviews?sessionId=${row.id}&kind=${encodeURIComponent(row.review_kind || 'custom')}`);
+        }}
+        onCreateReviewSessionFromFilter={async () => {
+          const row = await ws.createReviewSessionFromCurrentFilter();
+          if (row?.id) navigate(`/reviews?sessionId=${row.id}&kind=${encodeURIComponent(row.review_kind || 'custom')}`);
+        }}
+        onCreateTradePlanFromSelected={async () => {
+          const row = await ws.createTradePlanFromSelected();
+          if (row?.id) navigate('/plans');
+        }}
         onSetDateRange={ws.setDateRange}
         onUpdateFilter={ws.updateFilter}
       />
@@ -92,6 +105,17 @@ export default function TradeList() {
         onCancel={() => ws.setBatchEditOpen(false)}
         onConfirm={ws.handleBatchEditSubmit}
         onChangePatch={(k, v) => ws.setBatchPatch((p) => ({ ...p, [k]: v }))}
+      />
+
+      <TradeBatchStructuredReviewModal
+        open={ws.batchReviewOpen}
+        selectedCount={ws.selectedRowKeys.length}
+        review={ws.batchReviewPatch}
+        reviewTaxonomy={ws.reviewTaxonomy}
+        saving={ws.batchReviewSaving}
+        onCancel={() => ws.setBatchReviewOpen(false)}
+        onConfirm={ws.handleBatchStructuredReviewSubmit}
+        onChange={(k, v) => ws.setBatchReviewPatch((p) => ({ ...p, [k]: v }))}
       />
     </div>
   );

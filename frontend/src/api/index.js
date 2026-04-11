@@ -44,6 +44,27 @@ export const reviewApi = {
   upsertTradeLinks: (id, data) => api.put(`/reviews/${id}/trade-links`, data),
 };
 
+export const reviewSessionApi = {
+  list: (params) => api.get('/review-sessions', { params }),
+  get: (id) => api.get(`/review-sessions/${id}`),
+  create: (data) => api.post('/review-sessions', data),
+  update: (id, data) => api.put(`/review-sessions/${id}`, data),
+  delete: (id) => api.delete(`/review-sessions/${id}`),
+  upsertTradeLinks: (id, data) => api.put(`/review-sessions/${id}/trade-links`, data),
+  createFromSelection: (data) => api.post('/review-sessions/create-from-selection', data),
+};
+
+export const tradePlanApi = {
+  list: (params) => api.get('/trade-plans', { params }),
+  get: (id) => api.get(`/trade-plans/${id}`),
+  create: (data) => api.post('/trade-plans', data),
+  update: (id, data) => api.put(`/trade-plans/${id}`, data),
+  delete: (id) => api.delete(`/trade-plans/${id}`),
+  upsertTradeLinks: (id, data) => api.put(`/trade-plans/${id}/trade-links`, data),
+  upsertReviewSessionLinks: (id, data) => api.put(`/trade-plans/${id}/review-session-links`, data),
+  createFollowupReviewSession: (id) => api.post(`/trade-plans/${id}/create-followup-review-session`),
+};
+
 export const tradeReviewApi = {
   taxonomy: () => api.get('/trade-review-taxonomy'),
   get: (tradeId) => api.get(`/trades/${tradeId}/review`),

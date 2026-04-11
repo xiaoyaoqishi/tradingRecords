@@ -196,6 +196,121 @@ class ReviewTradeLink(Base):
     trade = relationship("Trade")
 
 
+class ReviewSession(Base):
+    __tablename__ = "review_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    title = Column(String(200), nullable=False)
+    review_kind = Column(String(40), nullable=False, index=True)
+    review_scope = Column(String(40), default="custom", index=True)
+    selection_mode = Column(String(40), default="manual", index=True)
+    selection_basis = Column(Text, nullable=False)
+    review_goal = Column(Text, nullable=False)
+    market_regime = Column(String(100))
+    summary = Column(Text)
+    repeated_errors = Column(Text)
+    next_focus = Column(Text)
+    action_items = Column(Text)
+    content = Column(Text)
+    research_notes = Column(Text)
+    tags_text = Column("tags", Text)
+    filter_snapshot_json = Column(Text)
+    is_favorite = Column(Boolean, default=False)
+    star_rating = Column(Integer, nullable=True)
+
+    trade_links = relationship("ReviewSessionTradeLink", back_populates="review_session", cascade="all, delete-orphan")
+
+
+class ReviewSessionTradeLink(Base):
+    __tablename__ = "review_session_trade_links"
+    __table_args__ = (
+        UniqueConstraint("review_session_id", "trade_id", name="uq_review_session_trade"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    review_session_id = Column(Integer, ForeignKey("review_sessions.id"), nullable=False, index=True)
+    trade_id = Column(Integer, ForeignKey("trades.id"), nullable=False, index=True)
+    role = Column(String(40), default="linked_trade")
+    note = Column(Text)
+    sort_order = Column(Integer, default=0)
+
+    review_session = relationship("ReviewSession", back_populates="trade_links")
+    trade = relationship("Trade")
+
+
+class TradePlan(Base):
+    __tablename__ = "trade_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    title = Column(String(200), nullable=False)
+    plan_date = Column(Date, nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="draft", index=True)
+    symbol = Column(String(50))
+    contract = Column(String(50))
+    direction_bias = Column(String(20))
+    setup_type = Column(String(80))
+    market_regime = Column(String(100))
+    entry_zone = Column(Text)
+    stop_loss_plan = Column(Text)
+    target_plan = Column(Text)
+    invalid_condition = Column(Text)
+    thesis = Column(Text)
+    risk_notes = Column(Text)
+    execution_checklist = Column(Text)
+    priority = Column(String(20), default="medium")
+    tags_text = Column("tags", Text)
+    source_ref = Column(String(200))
+    post_result_summary = Column(Text)
+    research_notes = Column(Text)
+
+    trade_links = relationship("TradePlanTradeLink", back_populates="trade_plan", cascade="all, delete-orphan")
+    review_session_links = relationship("TradePlanReviewSessionLink", back_populates="trade_plan", cascade="all, delete-orphan")
+
+
+class TradePlanTradeLink(Base):
+    __tablename__ = "trade_plan_trade_links"
+    __table_args__ = (
+        UniqueConstraint("trade_plan_id", "trade_id", name="uq_trade_plan_trade"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    trade_plan_id = Column(Integer, ForeignKey("trade_plans.id"), nullable=False, index=True)
+    trade_id = Column(Integer, ForeignKey("trades.id"), nullable=False, index=True)
+    note = Column(Text)
+    sort_order = Column(Integer, default=0)
+
+    trade_plan = relationship("TradePlan", back_populates="trade_links")
+    trade = relationship("Trade")
+
+
+class TradePlanReviewSessionLink(Base):
+    __tablename__ = "trade_plan_review_session_links"
+    __table_args__ = (
+        UniqueConstraint("trade_plan_id", "review_session_id", name="uq_trade_plan_review_session"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    trade_plan_id = Column(Integer, ForeignKey("trade_plans.id"), nullable=False, index=True)
+    review_session_id = Column(Integer, ForeignKey("review_sessions.id"), nullable=False, index=True)
+    note = Column(Text)
+
+    trade_plan = relationship("TradePlan", back_populates="review_session_links")
+    review_session = relationship("ReviewSession")
+
+
 class KnowledgeItem(Base):
     __tablename__ = "knowledge_items"
 

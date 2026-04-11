@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { Card, Col, Empty, Row, Spin, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { tradeApi } from '../api';
@@ -45,6 +45,20 @@ export default function Dashboard() {
       sources: parseCsv(filters.source_keyword),
     };
   }, [filters]);
+
+  const symbolOptions = useMemo(() => {
+    const rows = analytics?.dimensions?.by_symbol || [];
+    return rows
+      .map((row) => {
+        const key = String(row?.key || '').trim();
+        if (!key) return null;
+        return {
+          value: key,
+          label: formatSymbolDimensionKey(key),
+        };
+      })
+      .filter(Boolean);
+  }, [analytics]);
 
   const setDateRange = (dates) => {
     setFilters((prev) => {
@@ -100,6 +114,7 @@ export default function Dashboard() {
       </div>
 
       <AnalyticsFilterBar
+        symbolOptions={symbolOptions}
         sourceOptions={sourceOptions}
         filterValues={filterValues}
         onSetDateRange={setDateRange}
@@ -118,6 +133,8 @@ export default function Dashboard() {
             rows={dimensions.by_symbol || []}
             keyLabel="品种"
             valueFormatter={formatSymbolDimensionKey}
+            tablePageSize={5}
+            pageSizeOptions={[5, 10, 20, 50, 100]}
           />
         </Col>
         <Col xs={24} xl={12}>

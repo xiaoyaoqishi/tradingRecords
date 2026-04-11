@@ -1,11 +1,7 @@
-import { Button, Popconfirm, Rate, Space, Table, Tag } from 'antd';
+﻿import { Button, Popconfirm, Rate, Space, Table, Tag } from 'antd';
 import { DeleteOutlined, EditOutlined, EyeOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { formatInstrumentDisplay } from '../display';
-
-function renderSourceCell(row) {
-  return row.source_display || '-';
-}
 
 export default function TradeFillsTable({
   rows,
@@ -75,20 +71,15 @@ export default function TradeFillsTable({
       render: (v) => <Tag color={v === 'closed' ? 'default' : 'processing'}>{v === 'closed' ? '已平' : '持仓'}</Tag>,
     },
     {
-      title: '来源',
-      width: 185,
-      render: (_, r) => (
-        <Space size={4}>
-          <span>{renderSourceCell(r)}</span>
-          {r.source_is_metadata ? <Tag color="blue">Meta</Tag> : <Tag>Legacy</Tag>}
-        </Space>
-      ),
-      ellipsis: true,
+      title: '计划情况',
+      dataIndex: 'is_planned',
+      width: 90,
+      render: (v) => (v ? <Tag color="green">已计划</Tag> : <Tag color="default">未计划</Tag>),
     },
     {
       title: '复盘',
       width: 80,
-      render: (_, r) => (r.has_trade_review ? <Tag color="green">结构化</Tag> : <Tag>未录入</Tag>),
+      render: (_, r) => (r.has_trade_review ? <Tag color="green">已录入</Tag> : <Tag>未录入</Tag>),
     },
     {
       title: '收藏',

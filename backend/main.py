@@ -33,7 +33,8 @@ DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
 
 from database import engine, get_db, Base, SessionLocal
 from models import (
-    Trade, TradeReview, TradeSourceMetadata, Review, ReviewTradeLink, KnowledgeItem,
+    Trade, TradeReview, TradeSourceMetadata, Review, ReviewTradeLink, ReviewSession, ReviewSessionTradeLink,
+    TradePlan, TradePlanTradeLink, TradePlanReviewSessionLink, KnowledgeItem,
     Notebook, Note, NoteLink, TodoItem, NewsIssue, TradeBroker,
 )
 from schemas import (
@@ -44,6 +45,8 @@ from schemas import (
     TradeSourceMetadataUpsert, TradeSourceMetadataResponse,
     TradeBrokerCreate, TradeBrokerUpdate, TradeBrokerResponse,
     ReviewCreate, ReviewUpdate, ReviewResponse, ReviewTradeLinksPayload, ReviewTradeLinkResponse,
+    ReviewSessionCreate, ReviewSessionUpdate, ReviewSessionResponse, ReviewSessionTradeLinksPayload, ReviewSessionCreateFromSelection,
+    TradePlanCreate, TradePlanUpdate, TradePlanResponse, TradePlanTradeLinksPayload, TradePlanReviewSessionLinksPayload,
     KnowledgeItemCreate, KnowledgeItemUpdate, KnowledgeItemResponse,
     NotebookCreate, NotebookUpdate, NotebookResponse,
     NoteCreate, NoteUpdate, NoteResponse,
@@ -61,10 +64,20 @@ from trading.source_service import (
 )
 from trading.analytics_service import build_trade_analytics
 from trading.import_service import import_paste_trades_staged
-from trading.review_service import (
-    attach_review_link_fields as _review_attach_review_link_fields,
-    sync_review_trade_links as _review_sync_review_trade_links,
-    normalize_review_scope as _review_normalize_review_scope,
+from trading.review_session_service import (
+    attach_review_session_link_fields as _review_session_attach_link_fields,
+    sync_review_session_trade_links as _review_session_sync_trade_links,
+    normalize_review_session_scope as _review_session_normalize_scope,
+    normalize_review_session_kind as _review_session_normalize_kind,
+    normalize_review_selection_mode as _review_session_normalize_selection_mode,
+    normalize_review_selection_target as _review_session_normalize_selection_target,
+)
+from trading.trade_plan_service import (
+    attach_trade_plan_link_fields as _trade_plan_attach_link_fields,
+    sync_trade_plan_trade_links as _trade_plan_sync_trade_links,
+    sync_trade_plan_review_session_links as _trade_plan_sync_review_session_links,
+    normalize_trade_plan_status as _trade_plan_normalize_status,
+    assert_trade_plan_status_transition as _trade_plan_assert_status_transition,
 )
 from trading.knowledge_service import (
     list_knowledge_items as _knowledge_list_knowledge_items,
@@ -75,10 +88,8 @@ from trading.tag_service import (
     normalize_tag_list as _normalize_tag_list,
     serialize_legacy_tags as _serialize_legacy_tags,
     sync_trade_review_tags as _sync_trade_review_tags,
-    sync_review_tags as _sync_review_tags,
     sync_knowledge_item_tags as _sync_knowledge_item_tags,
     attach_trade_review_tags as _attach_trade_review_tags,
-    attach_review_tags as _attach_review_tags,
     attach_knowledge_item_tags as _attach_knowledge_item_tags,
 )
 
@@ -88,6 +99,14 @@ Base.metadata.create_all(bind=engine)
 def _column_names(db: Session, table: str) -> set[str]:
     rows = db.execute(text(f"PRAGMA table_info({table})")).fetchall()
     return {row[1] for row in rows}
+
+
+def _table_exists(db: Session, table: str) -> bool:
+    row = db.execute(
+        text("SELECT name FROM sqlite_master WHERE type = 'table' AND name = :name"),
+        {"name": table},
+    ).fetchone()
+    return bool(row)
 
 
 def _migrate_legacy_schema():
@@ -134,12 +153,75 @@ def _migrate_legacy_schema():
             db.execute(text("ALTER TABLE trades ADD COLUMN is_favorite BOOLEAN DEFAULT 0"))
         if "star_rating" not in trade_cols:
             db.execute(text("ALTER TABLE trades ADD COLUMN star_rating INTEGER"))
+        trade_plan_cols = _column_names(db, "trade_plans")
+        if trade_plan_cols and "research_notes" not in trade_plan_cols:
+            db.execute(text("ALTER TABLE trade_plans ADD COLUMN research_notes TEXT"))
         db.commit()
     finally:
         db.close()
 
 
 _migrate_legacy_schema()
+
+
+def _migrate_reviews_to_review_sessions():
+    db = SessionLocal()
+    try:
+        if not _table_exists(db, "review_sessions"):
+            return
+        has_review_rows = db.query(Review).first() is not None
+        has_review_session_rows = db.query(ReviewSession).first() is not None
+        if not has_review_rows or has_review_session_rows:
+            return
+
+        review_rows = db.query(Review).order_by(Review.id.asc()).all()
+        for row in review_rows:
+            obj = ReviewSession(
+                title=row.title or f"{row.review_date} {row.review_type}",
+                review_kind="period" if (row.review_scope or "periodic") == "periodic" else "custom",
+                review_scope=_review_session_normalize_scope(row.review_scope),
+                selection_mode="manual",
+                selection_basis=row.focus_topic or f"legacy review #{row.id}",
+                review_goal=row.summary or "legacy migration",
+                market_regime=row.market_regime,
+                summary=row.summary,
+                repeated_errors=row.repeated_errors,
+                next_focus=row.next_focus,
+                action_items=row.action_items,
+                content=row.content,
+                research_notes=row.research_notes,
+                tags_text=row.tags_text,
+                filter_snapshot_json=None,
+                is_favorite=bool(row.is_favorite),
+                star_rating=row.star_rating,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            db.add(obj)
+            db.flush()
+
+            trade_links = (
+                db.query(ReviewTradeLink)
+                .filter(ReviewTradeLink.review_id == row.id)
+                .order_by(ReviewTradeLink.id.asc())
+                .all()
+            )
+            for idx, link in enumerate(trade_links):
+                db.add(
+                    ReviewSessionTradeLink(
+                        review_session_id=obj.id,
+                        trade_id=link.trade_id,
+                        role=link.role,
+                        note=link.notes,
+                        sort_order=idx,
+                    )
+                )
+        db.commit()
+    finally:
+        db.close()
+
+
+_migrate_reviews_to_review_sessions()
 
 
 def _init_default_notebooks():
@@ -1335,20 +1417,326 @@ def delete_knowledge_item(item_id: int, db: Session = Depends(get_db)):
 # ── Review ──
 
 
-def _attach_review_link_fields(db: Session, rows: List[Review]) -> List[Review]:
-    return _review_attach_review_link_fields(db, rows)
+def _parse_tags_text(tags_text: Optional[str]) -> List[str]:
+    return _normalize_tag_list(tags_text)
 
 
-def _attach_review_fields(db: Session, rows: List[Review]) -> List[Review]:
-    rows = _attach_review_tags(db, rows)
-    rows = _attach_review_link_fields(db, rows)
+def _attach_review_session_fields(db: Session, rows: List[ReviewSession]) -> List[ReviewSession]:
+    rows = _review_session_attach_link_fields(db, rows)
+    for row in rows:
+        setattr(row, "tags", _parse_tags_text(row.tags_text))
     return rows
 
 
-def _sync_review_trade_links(db: Session, review: Review, links: List[Dict[str, Any]]) -> None:
-    _review_sync_review_trade_links(db, review, links)
+def _review_session_to_legacy_response(row: ReviewSession) -> Dict[str, Any]:
+    review_date = (row.created_at.date() if row.created_at else date.today())
+    scope = row.review_scope or "custom"
+    review_type = "custom"
+    if scope == "periodic":
+        review_type = "weekly"
+    return {
+        "id": row.id,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "review_type": review_type,
+        "review_date": review_date,
+        "title": row.title,
+        "review_scope": scope,
+        "focus_topic": row.selection_basis,
+        "market_regime": row.market_regime,
+        "tags": getattr(row, "tags", _parse_tags_text(row.tags_text)),
+        "tags_text": row.tags_text,
+        "best_trade": None,
+        "worst_trade": None,
+        "discipline_violated": None,
+        "loss_acceptable": None,
+        "execution_score": None,
+        "tomorrow_avoid": None,
+        "profit_source": None,
+        "loss_source": None,
+        "continue_trades": None,
+        "reduce_trades": None,
+        "repeated_errors": row.repeated_errors,
+        "next_focus": row.next_focus,
+        "profit_from_skill": None,
+        "best_strategy": None,
+        "profit_eating_behavior": None,
+        "adjust_symbols": None,
+        "adjust_position": None,
+        "pause_patterns": None,
+        "action_items": row.action_items,
+        "content": row.content,
+        "research_notes": row.research_notes,
+        "summary": row.summary,
+        "is_favorite": row.is_favorite,
+        "star_rating": row.star_rating,
+        "trade_links": [
+            {
+                "id": x.id,
+                "review_id": row.id,
+                "trade_id": x.trade_id,
+                "role": x.role,
+                "notes": x.note,
+                "trade_summary": getattr(x, "trade_summary", None),
+                "created_at": x.created_at,
+                "updated_at": x.updated_at,
+            }
+            for x in getattr(row, "trade_links", [])
+        ],
+        "linked_trade_ids": [x.trade_id for x in getattr(row, "trade_links", [])],
+    }
 
 
+def _apply_trade_filters(
+    q,
+    *,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    instrument_type: Optional[str] = None,
+    symbol: Optional[str] = None,
+    direction: Optional[str] = None,
+    status: Optional[str] = None,
+    strategy_type: Optional[str] = None,
+    source_keyword: Optional[str] = None,
+    is_favorite: Optional[bool] = None,
+    min_star_rating: Optional[int] = None,
+    max_star_rating: Optional[int] = None,
+):
+    if date_from:
+        q = q.filter(Trade.trade_date >= date_from)
+    if date_to:
+        q = q.filter(Trade.trade_date <= date_to)
+    if instrument_type:
+        q = q.filter(Trade.instrument_type == instrument_type)
+    if symbol:
+        q = q.filter(Trade.symbol == symbol)
+    if direction:
+        q = q.filter(Trade.direction == direction)
+    if status:
+        q = q.filter(Trade.status == status)
+    if strategy_type:
+        q = q.filter(Trade.strategy_type == strategy_type)
+    if is_favorite is not None:
+        q = q.filter(Trade.is_favorite == is_favorite)
+    if min_star_rating is not None:
+        q = q.filter(Trade.star_rating >= min_star_rating)
+    if max_star_rating is not None:
+        q = q.filter(Trade.star_rating <= max_star_rating)
+    q = _apply_source_keyword_filter(q, source_keyword)
+    return q
+
+
+def _build_trade_ids_from_filter(db: Session, filter_params: Dict[str, Any]) -> List[int]:
+    q = db.query(Trade)
+    q = _apply_trade_filters(
+        q,
+        date_from=filter_params.get("date_from"),
+        date_to=filter_params.get("date_to"),
+        instrument_type=filter_params.get("instrument_type"),
+        symbol=filter_params.get("symbol"),
+        direction=filter_params.get("direction"),
+        status=filter_params.get("status"),
+        strategy_type=filter_params.get("strategy_type"),
+        source_keyword=filter_params.get("source_keyword"),
+        is_favorite=filter_params.get("is_favorite"),
+        min_star_rating=filter_params.get("min_star_rating"),
+        max_star_rating=filter_params.get("max_star_rating"),
+    )
+    rows = q.order_by(Trade.open_time.desc(), Trade.id.desc()).all()
+    return [x.id for x in rows if x.id]
+
+
+def _create_review_session_from_payload(db: Session, payload: Dict[str, Any], trade_links: List[Dict[str, Any]]) -> ReviewSession:
+    tags_raw = payload.pop("tags", None) if "tags" in payload else None
+    payload["review_kind"] = _review_session_normalize_kind(payload.get("review_kind"))
+    payload["review_scope"] = _review_session_normalize_scope(payload.get("review_scope"))
+    payload["selection_mode"] = _review_session_normalize_selection_mode(payload.get("selection_mode"))
+    obj = ReviewSession(**payload)
+    db.add(obj)
+    db.flush()
+    tag_names = _normalize_tag_list(tags_raw)
+    obj.tags_text = _serialize_legacy_tags(tag_names)
+    _review_session_sync_trade_links(db, obj, trade_links)
+    db.commit()
+    db.refresh(obj)
+    return _attach_review_session_fields(db, [obj])[0]
+
+
+@app.get("/api/review-sessions", response_model=List[ReviewSessionResponse])
+def list_review_sessions(
+    review_kind: Optional[str] = None,
+    review_scope: Optional[str] = None,
+    selection_mode: Optional[str] = None,
+    tag: Optional[str] = None,
+    is_favorite: Optional[bool] = None,
+    min_star_rating: Optional[int] = Query(None, ge=1, le=5),
+    max_star_rating: Optional[int] = Query(None, ge=1, le=5),
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = "desc",
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    q = db.query(ReviewSession)
+    if review_kind:
+        q = q.filter(ReviewSession.review_kind == _review_session_normalize_kind(review_kind))
+    if review_scope:
+        q = q.filter(ReviewSession.review_scope == _review_session_normalize_scope(review_scope))
+    if selection_mode:
+        q = q.filter(ReviewSession.selection_mode == _review_session_normalize_selection_mode(selection_mode))
+    if tag and tag.strip():
+        q = q.filter(ReviewSession.tags_text.contains(tag.strip()))
+    if is_favorite is not None:
+        q = q.filter(ReviewSession.is_favorite == is_favorite)
+    if min_star_rating is not None:
+        q = q.filter(ReviewSession.star_rating >= min_star_rating)
+    if max_star_rating is not None:
+        q = q.filter(ReviewSession.star_rating <= max_star_rating)
+    if sort_by not in {None, "updated_at", "star_rating"}:
+        raise HTTPException(400, "sort_by must be one of: updated_at, star_rating")
+    if sort_order not in {"asc", "desc"}:
+        raise HTTPException(400, "sort_order must be one of: asc, desc")
+    order_desc = sort_order != "asc"
+    if sort_by == "updated_at":
+        order_expr = ReviewSession.updated_at.desc() if order_desc else ReviewSession.updated_at.asc()
+        q = q.order_by(order_expr, ReviewSession.id.desc())
+    elif sort_by == "star_rating":
+        order_expr = ReviewSession.star_rating.desc() if order_desc else ReviewSession.star_rating.asc()
+        q = q.order_by(order_expr, ReviewSession.updated_at.desc(), ReviewSession.id.desc())
+    else:
+        q = q.order_by(ReviewSession.updated_at.desc(), ReviewSession.id.desc())
+    rows = q.offset((page - 1) * size).limit(size).all()
+    return _attach_review_session_fields(db, rows)
+
+
+@app.post("/api/review-sessions", response_model=ReviewSessionResponse)
+def create_review_session(payload: ReviewSessionCreate, db: Session = Depends(get_db)):
+    row = _create_review_session_from_payload(
+        db,
+        payload.model_dump(exclude={"trade_links"}),
+        [x.model_dump() for x in (payload.trade_links or [])],
+    )
+    return row
+
+
+@app.post("/api/review-sessions/create-from-selection", response_model=ReviewSessionResponse)
+def create_review_session_from_selection(payload: ReviewSessionCreateFromSelection, db: Session = Depends(get_db)):
+    selection_target = _review_session_normalize_selection_target(payload.selection_target)
+    selection_mode = _review_session_normalize_selection_mode(payload.selection_mode)
+
+    trade_ids: List[int] = []
+    if selection_mode == "manual":
+        trade_ids = [int(x) for x in payload.trade_ids if int(x) > 0]
+    elif selection_mode == "filter_snapshot":
+        if selection_target == "current_page":
+            trade_ids = [int(x) for x in payload.trade_ids if int(x) > 0]
+        else:
+            trade_ids = _build_trade_ids_from_filter(db, payload.filter_params or {})
+    else:
+        trade_ids = [int(x) for x in payload.trade_ids if int(x) > 0]
+
+    dedup_ids: List[int] = []
+    seen = set()
+    for tid in trade_ids:
+        if tid in seen:
+            continue
+        seen.add(tid)
+        dedup_ids.append(tid)
+
+    trade_links = [{"trade_id": tid, "role": "linked_trade", "sort_order": idx} for idx, tid in enumerate(dedup_ids)]
+    filter_snapshot = payload.filter_snapshot_json
+    if not filter_snapshot and payload.filter_params is not None:
+        filter_snapshot = json.dumps(
+            {
+                "selection_mode": selection_mode,
+                "selection_target": selection_target,
+                "filter_params": payload.filter_params,
+            },
+            ensure_ascii=False,
+        )
+
+    row = _create_review_session_from_payload(
+        db,
+        {
+            "title": payload.title,
+            "review_kind": payload.review_kind,
+            "review_scope": payload.review_scope,
+            "selection_mode": selection_mode,
+            "selection_basis": payload.selection_basis,
+            "review_goal": payload.review_goal,
+            "market_regime": payload.market_regime,
+            "summary": payload.summary,
+            "repeated_errors": payload.repeated_errors,
+            "next_focus": payload.next_focus,
+            "action_items": payload.action_items,
+            "tags": payload.tags,
+            "filter_snapshot_json": filter_snapshot,
+        },
+        trade_links,
+    )
+    return row
+
+
+@app.get("/api/review-sessions/{review_session_id}", response_model=ReviewSessionResponse)
+def get_review_session(review_session_id: int, db: Session = Depends(get_db)):
+    row = db.query(ReviewSession).filter(ReviewSession.id == review_session_id).first()
+    if not row:
+        raise HTTPException(404, "Review session not found")
+    return _attach_review_session_fields(db, [row])[0]
+
+
+@app.put("/api/review-sessions/{review_session_id}", response_model=ReviewSessionResponse)
+def update_review_session(review_session_id: int, data: ReviewSessionUpdate, db: Session = Depends(get_db)):
+    row = db.query(ReviewSession).filter(ReviewSession.id == review_session_id).first()
+    if not row:
+        raise HTTPException(404, "Review session not found")
+    payload = data.model_dump(exclude_unset=True)
+    tags_raw = payload.pop("tags", None) if "tags" in payload else None
+    if "review_kind" in payload:
+        payload["review_kind"] = _review_session_normalize_kind(payload.get("review_kind"))
+    if "review_scope" in payload:
+        payload["review_scope"] = _review_session_normalize_scope(payload.get("review_scope"))
+    if "selection_mode" in payload:
+        payload["selection_mode"] = _review_session_normalize_selection_mode(payload.get("selection_mode"))
+    for k, v in payload.items():
+        setattr(row, k, v)
+    if tags_raw is not None:
+        row.tags_text = _serialize_legacy_tags(_normalize_tag_list(tags_raw))
+    db.commit()
+    db.refresh(row)
+    return _attach_review_session_fields(db, [row])[0]
+
+
+@app.delete("/api/review-sessions/{review_session_id}")
+def delete_review_session(review_session_id: int, db: Session = Depends(get_db)):
+    row = db.query(ReviewSession).filter(ReviewSession.id == review_session_id).first()
+    if not row:
+        raise HTTPException(404, "Review session not found")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@app.put("/api/review-sessions/{review_session_id}/trade-links", response_model=ReviewSessionResponse)
+def upsert_review_session_trade_links(
+    review_session_id: int,
+    payload: ReviewSessionTradeLinksPayload,
+    db: Session = Depends(get_db),
+):
+    row = db.query(ReviewSession).filter(ReviewSession.id == review_session_id).first()
+    if not row:
+        raise HTTPException(404, "Review session not found")
+    _review_session_sync_trade_links(
+        db,
+        row,
+        [x.model_dump() for x in (payload.trade_links or [])],
+    )
+    db.commit()
+    db.refresh(row)
+    return _attach_review_session_fields(db, [row])[0]
+
+
+# Compatibility alias over canonical ReviewSession storage.
 @app.get("/api/reviews", response_model=List[ReviewResponse])
 def list_reviews(
     review_type: Optional[str] = None,
@@ -1365,108 +1753,295 @@ def list_reviews(
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Review)
-    if review_type:
-        q = q.filter(Review.review_type == review_type)
-    if review_scope:
-        q = q.filter(Review.review_scope == _review_normalize_review_scope(review_scope))
-    if tag and tag.strip():
-        q = q.filter(Review.tags_text.contains(tag.strip()))
-    if is_favorite is not None:
-        q = q.filter(Review.is_favorite == is_favorite)
-    if min_star_rating is not None:
-        q = q.filter(Review.star_rating >= min_star_rating)
-    if max_star_rating is not None:
-        q = q.filter(Review.star_rating <= max_star_rating)
-    if date_from:
-        q = q.filter(Review.review_date >= date_from)
-    if date_to:
-        q = q.filter(Review.review_date <= date_to)
-    if sort_by not in {None, "updated_at", "star_rating"}:
-        raise HTTPException(400, "sort_by must be one of: updated_at, star_rating")
-    if sort_order not in {"asc", "desc"}:
-        raise HTTPException(400, "sort_order must be one of: asc, desc")
-    order_desc = sort_order != "asc"
-    if sort_by == "updated_at":
-        order_expr = Review.updated_at.desc() if order_desc else Review.updated_at.asc()
-        q = q.order_by(order_expr, Review.id.desc())
-    elif sort_by == "star_rating":
-        order_expr = Review.star_rating.desc() if order_desc else Review.star_rating.asc()
-        q = q.order_by(order_expr, Review.updated_at.desc(), Review.id.desc())
-    else:
-        q = q.order_by(Review.review_date.desc())
-    rows = q.offset((page - 1) * size).limit(size).all()
-    return _attach_review_fields(db, rows)
+    kind_map = {
+        "daily": "period",
+        "weekly": "period",
+        "monthly": "period",
+        "custom": "custom",
+    }
+    kind = kind_map.get(review_type, None) if review_type else None
+    rows = list_review_sessions(
+        review_kind=kind,
+        review_scope=review_scope,
+        selection_mode=None,
+        tag=tag,
+        is_favorite=is_favorite,
+        min_star_rating=min_star_rating,
+        max_star_rating=max_star_rating,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        page=page,
+        size=size,
+        db=db,
+    )
+    if date_from or date_to:
+        out_rows = []
+        for row in rows:
+            row_date = row.created_at.date() if row.created_at else date.today()
+            if date_from and str(row_date) < str(date_from):
+                continue
+            if date_to and str(row_date) > str(date_to):
+                continue
+            out_rows.append(row)
+        rows = out_rows
+    return [_review_session_to_legacy_response(x) for x in rows]
 
 
 @app.post("/api/reviews", response_model=ReviewResponse)
 def create_review(review: ReviewCreate, db: Session = Depends(get_db)):
     payload = review.model_dump()
-    tags_raw = payload.pop("tags", None) if "tags" in payload else None
-    payload["review_scope"] = _review_normalize_review_scope(payload.get("review_scope"))
-    obj = Review(**payload)
-    db.add(obj)
-    db.flush()
-    tag_names = _normalize_tag_list(tags_raw)
-    obj.tags_text = _serialize_legacy_tags(tag_names)
-    _sync_review_tags(db, obj.id, tag_names)
-    db.commit()
-    db.refresh(obj)
-    return _attach_review_fields(db, [obj])[0]
+    row = _create_review_session_from_payload(
+        db,
+        {
+            "title": payload.get("title") or f"{payload.get('review_date')} {payload.get('review_type')}",
+            "review_kind": "period" if payload.get("review_type") in {"daily", "weekly", "monthly"} else "custom",
+            "review_scope": payload.get("review_scope"),
+            "selection_mode": "manual",
+            "selection_basis": payload.get("focus_topic") or payload.get("title") or "legacy-review",
+            "review_goal": payload.get("summary") or payload.get("next_focus") or "legacy compatibility review",
+            "market_regime": payload.get("market_regime"),
+            "summary": payload.get("summary"),
+            "repeated_errors": payload.get("repeated_errors"),
+            "next_focus": payload.get("next_focus"),
+            "action_items": payload.get("action_items"),
+            "content": payload.get("content"),
+            "research_notes": payload.get("research_notes"),
+            "tags": payload.get("tags"),
+            "is_favorite": payload.get("is_favorite"),
+            "star_rating": payload.get("star_rating"),
+            "filter_snapshot_json": None,
+        },
+        [],
+    )
+    return _review_session_to_legacy_response(row)
 
 
 @app.get("/api/reviews/{review_id}", response_model=ReviewResponse)
 def get_review(review_id: int, db: Session = Depends(get_db)):
-    r = db.query(Review).filter(Review.id == review_id).first()
-    if not r:
+    row = db.query(ReviewSession).filter(ReviewSession.id == review_id).first()
+    if not row:
         raise HTTPException(404, "Review not found")
-    return _attach_review_fields(db, [r])[0]
+    row = _attach_review_session_fields(db, [row])[0]
+    return _review_session_to_legacy_response(row)
 
 
 @app.put("/api/reviews/{review_id}", response_model=ReviewResponse)
 def update_review(review_id: int, data: ReviewUpdate, db: Session = Depends(get_db)):
-    r = db.query(Review).filter(Review.id == review_id).first()
-    if not r:
+    row = db.query(ReviewSession).filter(ReviewSession.id == review_id).first()
+    if not row:
         raise HTTPException(404, "Review not found")
     payload = data.model_dump(exclude_unset=True)
-    tags_raw = payload.pop("tags", None) if "tags" in payload else None
-    if "review_scope" in payload:
-        payload["review_scope"] = _review_normalize_review_scope(payload.get("review_scope"))
-    for k, v in payload.items():
-        setattr(r, k, v)
-    if tags_raw is not None:
-        tag_names = _normalize_tag_list(tags_raw)
-        r.tags_text = _serialize_legacy_tags(tag_names)
-        db.flush()
-        _sync_review_tags(db, r.id, tag_names)
+    mapped = {
+        "title": payload.get("title"),
+        "review_scope": payload.get("review_scope"),
+        "selection_basis": payload.get("focus_topic"),
+        "review_goal": payload.get("summary") or payload.get("next_focus"),
+        "market_regime": payload.get("market_regime"),
+        "summary": payload.get("summary"),
+        "repeated_errors": payload.get("repeated_errors"),
+        "next_focus": payload.get("next_focus"),
+        "action_items": payload.get("action_items"),
+        "content": payload.get("content"),
+        "research_notes": payload.get("research_notes"),
+        "is_favorite": payload.get("is_favorite"),
+        "star_rating": payload.get("star_rating"),
+    }
+    for k, v in mapped.items():
+        if v is None:
+            continue
+        if k == "review_scope":
+            setattr(row, k, _review_session_normalize_scope(v))
+        else:
+            setattr(row, k, v)
+    if "tags" in payload:
+        row.tags_text = _serialize_legacy_tags(_normalize_tag_list(payload.get("tags")))
     db.commit()
-    db.refresh(r)
-    return _attach_review_fields(db, [r])[0]
+    db.refresh(row)
+    row = _attach_review_session_fields(db, [row])[0]
+    return _review_session_to_legacy_response(row)
 
 
 @app.delete("/api/reviews/{review_id}")
 def delete_review(review_id: int, db: Session = Depends(get_db)):
-    r = db.query(Review).filter(Review.id == review_id).first()
-    if not r:
+    row = db.query(ReviewSession).filter(ReviewSession.id == review_id).first()
+    if not row:
         raise HTTPException(404, "Review not found")
-    db.delete(r)
+    db.delete(row)
     db.commit()
     return {"ok": True}
 
 
 @app.put("/api/reviews/{review_id}/trade-links", response_model=ReviewResponse)
 def upsert_review_trade_links(review_id: int, payload: ReviewTradeLinksPayload, db: Session = Depends(get_db)):
-    r = db.query(Review).filter(Review.id == review_id).first()
-    if not r:
+    row = db.query(ReviewSession).filter(ReviewSession.id == review_id).first()
+    if not row:
         raise HTTPException(404, "Review not found")
-    _sync_review_trade_links(
+    _review_session_sync_trade_links(
         db,
-        r,
-        [x.model_dump() for x in (payload.trade_links or [])],
+        row,
+        [{"trade_id": x.trade_id, "role": x.role, "note": x.notes} for x in (payload.trade_links or [])],
     )
     db.commit()
-    db.refresh(r)
-    return _attach_review_fields(db, [r])[0]
+    db.refresh(row)
+    row = _attach_review_session_fields(db, [row])[0]
+    return _review_session_to_legacy_response(row)
+
+
+# ── Trade Plan ──
+
+
+def _attach_trade_plan_fields(db: Session, rows: List[TradePlan]) -> List[TradePlan]:
+    rows = _trade_plan_attach_link_fields(db, rows)
+    for row in rows:
+        setattr(row, "tags", _parse_tags_text(row.tags_text))
+    return rows
+
+
+@app.get("/api/trade-plans", response_model=List[TradePlanResponse])
+def list_trade_plans(
+    status: Optional[str] = None,
+    symbol: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    q = db.query(TradePlan)
+    if status:
+        q = q.filter(TradePlan.status == _trade_plan_normalize_status(status))
+    if symbol:
+        q = q.filter(TradePlan.symbol == symbol)
+    if date_from:
+        q = q.filter(TradePlan.plan_date >= date_from)
+    if date_to:
+        q = q.filter(TradePlan.plan_date <= date_to)
+    rows = q.order_by(TradePlan.updated_at.desc(), TradePlan.id.desc()).offset((page - 1) * size).limit(size).all()
+    return _attach_trade_plan_fields(db, rows)
+
+
+@app.post("/api/trade-plans", response_model=TradePlanResponse)
+def create_trade_plan(payload: TradePlanCreate, db: Session = Depends(get_db)):
+    data = payload.model_dump(exclude={"trade_links"})
+    tags_raw = data.pop("tags", None) if "tags" in data else None
+    data["status"] = _trade_plan_normalize_status(data.get("status"))
+    obj = TradePlan(**data)
+    db.add(obj)
+    db.flush()
+    obj.tags_text = _serialize_legacy_tags(_normalize_tag_list(tags_raw))
+    _trade_plan_sync_trade_links(db, obj, [x.model_dump() for x in (payload.trade_links or [])])
+    db.commit()
+    db.refresh(obj)
+    return _attach_trade_plan_fields(db, [obj])[0]
+
+
+@app.get("/api/trade-plans/{trade_plan_id}", response_model=TradePlanResponse)
+def get_trade_plan(trade_plan_id: int, db: Session = Depends(get_db)):
+    row = db.query(TradePlan).filter(TradePlan.id == trade_plan_id).first()
+    if not row:
+        raise HTTPException(404, "Trade plan not found")
+    return _attach_trade_plan_fields(db, [row])[0]
+
+
+@app.put("/api/trade-plans/{trade_plan_id}", response_model=TradePlanResponse)
+def update_trade_plan(trade_plan_id: int, payload: TradePlanUpdate, db: Session = Depends(get_db)):
+    row = db.query(TradePlan).filter(TradePlan.id == trade_plan_id).first()
+    if not row:
+        raise HTTPException(404, "Trade plan not found")
+    updates = payload.model_dump(exclude_unset=True)
+    tags_raw = updates.pop("tags", None) if "tags" in updates else None
+    if "status" in updates:
+        next_status = _trade_plan_normalize_status(updates.get("status"))
+        _trade_plan_assert_status_transition(row.status, next_status)
+        updates["status"] = next_status
+    for k, v in updates.items():
+        setattr(row, k, v)
+    if tags_raw is not None:
+        row.tags_text = _serialize_legacy_tags(_normalize_tag_list(tags_raw))
+    db.commit()
+    db.refresh(row)
+    return _attach_trade_plan_fields(db, [row])[0]
+
+
+@app.delete("/api/trade-plans/{trade_plan_id}")
+def delete_trade_plan(trade_plan_id: int, db: Session = Depends(get_db)):
+    row = db.query(TradePlan).filter(TradePlan.id == trade_plan_id).first()
+    if not row:
+        raise HTTPException(404, "Trade plan not found")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@app.put("/api/trade-plans/{trade_plan_id}/trade-links", response_model=TradePlanResponse)
+def upsert_trade_plan_trade_links(
+    trade_plan_id: int,
+    payload: TradePlanTradeLinksPayload,
+    db: Session = Depends(get_db),
+):
+    row = db.query(TradePlan).filter(TradePlan.id == trade_plan_id).first()
+    if not row:
+        raise HTTPException(404, "Trade plan not found")
+    _trade_plan_sync_trade_links(db, row, [x.model_dump() for x in (payload.trade_links or [])])
+    db.commit()
+    db.refresh(row)
+    return _attach_trade_plan_fields(db, [row])[0]
+
+
+@app.put("/api/trade-plans/{trade_plan_id}/review-session-links", response_model=TradePlanResponse)
+def upsert_trade_plan_review_session_links(
+    trade_plan_id: int,
+    payload: TradePlanReviewSessionLinksPayload,
+    db: Session = Depends(get_db),
+):
+    row = db.query(TradePlan).filter(TradePlan.id == trade_plan_id).first()
+    if not row:
+        raise HTTPException(404, "Trade plan not found")
+    _trade_plan_sync_review_session_links(db, row, [x.model_dump() for x in (payload.review_session_links or [])])
+    db.commit()
+    db.refresh(row)
+    return _attach_trade_plan_fields(db, [row])[0]
+
+
+@app.post("/api/trade-plans/{trade_plan_id}/create-followup-review-session", response_model=ReviewSessionResponse)
+def create_followup_review_session_from_trade_plan(trade_plan_id: int, db: Session = Depends(get_db)):
+    plan = db.query(TradePlan).filter(TradePlan.id == trade_plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Trade plan not found")
+    plan = _attach_trade_plan_fields(db, [plan])[0]
+    trade_links = [
+        {"trade_id": x.trade_id, "role": "linked_trade", "sort_order": idx}
+        for idx, x in enumerate(getattr(plan, "trade_links", []))
+    ]
+    session = _create_review_session_from_payload(
+        db,
+        {
+            "title": f"计划跟踪复盘：{plan.title}",
+            "review_kind": "plan-followup",
+            "review_scope": "campaign",
+            "selection_mode": "plan_linked",
+            "selection_basis": f"来自交易计划 #{plan.id} 的关联成交样本",
+            "review_goal": "评估计划到执行的转化质量与偏差",
+            "market_regime": plan.market_regime,
+            "summary": None,
+            "repeated_errors": None,
+            "next_focus": None,
+            "action_items": None,
+            "content": None,
+            "research_notes": None,
+            "tags": _parse_tags_text(plan.tags_text),
+            "filter_snapshot_json": json.dumps({"source": "trade_plan", "trade_plan_id": plan.id}, ensure_ascii=False),
+        },
+        trade_links,
+    )
+    _trade_plan_sync_review_session_links(
+        db,
+        plan,
+        [{"review_session_id": session.id, "note": "自动创建计划跟踪复盘"}],
+    )
+    db.commit()
+    db.refresh(plan)
+    return session
 
 
 # ── Notebook ──

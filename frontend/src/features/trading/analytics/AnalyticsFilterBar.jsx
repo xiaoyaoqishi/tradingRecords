@@ -1,9 +1,9 @@
-import { Card, Col, DatePicker, Row, Select, Space } from 'antd';
-import { FUTURES_SYMBOL_OPTIONS } from '../../../utils/futures';
+﻿import { Card, Col, DatePicker, Row, Select, Space } from 'antd';
 
 const { RangePicker } = DatePicker;
 
 export default function AnalyticsFilterBar({
+  symbolOptions,
   sourceOptions,
   filterValues,
   onSetDateRange,
@@ -22,8 +22,8 @@ export default function AnalyticsFilterBar({
               allowClear
               showSearch
               optionFilterProp="label"
-              style={{ width: 170 }}
-              options={FUTURES_SYMBOL_OPTIONS}
+              style={{ width: 220 }}
+              options={symbolOptions}
               value={filterValues.symbols}
               onChange={onSetSymbol}
             />
@@ -33,7 +33,7 @@ export default function AnalyticsFilterBar({
               allowClear
               showSearch
               optionFilterProp="label"
-              style={{ width: 190 }}
+              style={{ width: 220 }}
               options={sourceOptions}
               value={filterValues.sources}
               onChange={onSetSource}
