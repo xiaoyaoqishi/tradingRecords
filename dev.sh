@@ -9,7 +9,6 @@ SERVICES=(
   "backend|$ROOT_DIR/backend|DEV_MODE=1 python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
   "frontend|$ROOT_DIR/frontend|npm run dev"
   "notes|$ROOT_DIR/frontend-notes|npm run dev"
-  "news|$ROOT_DIR/frontend-news|npm run dev"
   "monitor|$ROOT_DIR/frontend-monitor|npm run dev"
 )
 

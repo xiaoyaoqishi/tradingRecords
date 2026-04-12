@@ -27,10 +27,6 @@ cd ../frontend-monitor
 npm install
 npm run build
 
-cd ../frontend-news
-npm install
-npm run build
-
 echo "=== 5. 配置 Nginx ==="
 cp ../deploy/nginx.conf /etc/nginx/sites-available/trading
 ln -sf /etc/nginx/sites-available/trading /etc/nginx/sites-enabled/trading

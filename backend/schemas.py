@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+﻿from pydantic import BaseModel, Field
 from typing import Optional, List, Union
 from datetime import date, datetime
 
@@ -637,13 +637,13 @@ class KnowledgeItemResponse(KnowledgeItemCreate):
         from_attributes = True
 
 
-# ── Notebook ──
+# 鈹€鈹€ Notebook 鈹€鈹€
 
 
 class NotebookCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    icon: Optional[str] = "📁"
+    icon: Optional[str] = "馃搧"
     parent_id: Optional[int] = None
     sort_order: Optional[int] = 0
 
@@ -665,7 +665,7 @@ class NotebookResponse(NotebookCreate):
         from_attributes = True
 
 
-# ── Note ──
+# 鈹€鈹€ Note 鈹€鈹€
 
 
 class NoteCreate(BaseModel):
@@ -700,7 +700,7 @@ class NoteResponse(NoteCreate):
         from_attributes = True
 
 
-# ── Todo ──
+# 鈹€鈹€ Todo 鈹€鈹€
 
 
 class TodoCreate(BaseModel):
@@ -737,26 +737,6 @@ class TodoResponse(BaseModel):
         from_attributes = True
 
 
-# ── News ──
+# 鈹€鈹€ News 鈹€鈹€
 
 
-class NewsIssueResponse(BaseModel):
-    id: int
-    title: str
-    issue_date: Optional[date] = None
-    source_repo: str
-    source_path: str
-    source_sha: Optional[str] = None
-    source_url: Optional[str] = None
-    status: str
-    translated_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
-
-class NewsIssueDetailResponse(NewsIssueResponse):
-    content_en: Optional[str] = ""
-    content_zh: Optional[str] = ""

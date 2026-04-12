@@ -24,11 +24,6 @@ cd ../frontend-monitor
 npm install
 npm run build
 
-echo "=== 构建新闻前端 ==="
-cd ../frontend-news
-npm install
-npm run build
-
 echo "=== 同步门户页面 ==="
 cp ../portal/*.html /opt/tradingRecords/portal/
 
