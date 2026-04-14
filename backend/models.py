@@ -334,6 +334,7 @@ class KnowledgeItem(Base):
     due_date = Column(Date)
     source_ref = Column(String(200))
     tag_links = relationship("KnowledgeItemTagLink", back_populates="knowledge_item", cascade="all, delete-orphan")
+    note_links = relationship("KnowledgeItemNoteLink", back_populates="knowledge_item", cascade="all, delete-orphan")
 
 
 class TagTerm(Base):
@@ -393,6 +394,23 @@ class KnowledgeItemTagLink(Base):
 
     knowledge_item = relationship("KnowledgeItem", back_populates="tag_links")
     tag_term = relationship("TagTerm")
+
+
+class KnowledgeItemNoteLink(Base):
+    __tablename__ = "knowledge_item_note_links"
+    __table_args__ = (
+        UniqueConstraint("knowledge_item_id", "note_id", name="uq_knowledge_item_note"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    knowledge_item_id = Column(Integer, ForeignKey("knowledge_items.id"), nullable=False, index=True)
+    note_id = Column(Integer, ForeignKey("notes.id"), nullable=False, index=True)
+    sort_order = Column(Integer, default=0)
+
+    knowledge_item = relationship("KnowledgeItem", back_populates="note_links")
+    note = relationship("Note")
 
 
 class Notebook(Base):

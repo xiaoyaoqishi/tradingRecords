@@ -20,7 +20,7 @@ import {
 } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { brokerApi, knowledgeApi } from '../api';
+import { brokerApi, knowledgeApi, noteApi, notebookApi } from '../api';
 import {
   KNOWLEDGE_CATEGORY_ZH,
   KNOWLEDGE_PRIORITY_ZH,
@@ -58,7 +58,78 @@ function normalizeKnowledgePayload(values) {
     next_action: values.next_action?.trim() || null,
     source_ref: values.source_ref?.trim() || null,
     due_date: values.due_date ? values.due_date.format('YYYY-MM-DD') : null,
+    related_note_ids: normalizeNoteIdList(values.related_note_ids),
   };
+}
+
+function normalizeNoteIdList(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const id = Number(item);
+    if (!Number.isInteger(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+function mergeNoteOptions(base, extra) {
+  const out = [];
+  const seen = new Set();
+  for (const row of [...(base || []), ...(extra || [])]) {
+    if (!row || !Number.isInteger(Number(row.value))) continue;
+    const value = Number(row.value);
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push({ value, label: row.label || `文档 #${value}` });
+  }
+  return out;
+}
+
+function buildNotebookPath(notebookId, notebookMap) {
+  if (!notebookId || !(notebookMap instanceof Map) || notebookMap.size === 0) return '';
+  const parts = [];
+  let currentId = notebookId;
+  let guard = 0;
+  while (currentId && guard < 40) {
+    const node = notebookMap.get(currentId);
+    if (!node) break;
+    const name = (node.name || '').trim();
+    if (name) parts.push(name);
+    currentId = node.parent_id || null;
+    guard += 1;
+  }
+  return parts.reverse().join('-');
+}
+
+function toDocOption(row, notebookMap) {
+  const title = ((row?.title || '').trim()) || '无标题';
+  const path = buildNotebookPath(row?.notebook_id, notebookMap);
+  return {
+    value: Number(row?.id),
+    label: path ? `${path}-${title}` : title,
+  };
+}
+
+function collectDescendantNotebookIds(rootIds, notebookRows) {
+  const childMap = new Map();
+  for (const nb of notebookRows || []) {
+    const pid = nb?.parent_id || null;
+    if (!childMap.has(pid)) childMap.set(pid, []);
+    childMap.get(pid).push(nb.id);
+  }
+  const out = new Set();
+  const queue = [...rootIds];
+  while (queue.length) {
+    const id = queue.shift();
+    if (!id || out.has(id)) continue;
+    out.add(id);
+    const children = childMap.get(id) || [];
+    for (const childId of children) queue.push(childId);
+  }
+  return out;
 }
 
 function normalizeBrokerPayload(values) {
@@ -81,6 +152,9 @@ export default function InfoMaintain() {
   const [selectedKnowledgeId, setSelectedKnowledgeId] = useState(null);
   const [knowledgeFilters, setKnowledgeFilters] = useState({ category: undefined, status: 'active', tag: undefined, q: '' });
   const [knowledgeCategories, setKnowledgeCategories] = useState([]);
+  const [knowledgeDocOptions, setKnowledgeDocOptions] = useState([]);
+  const [knowledgeDocSearching, setKnowledgeDocSearching] = useState(false);
+  const [knowledgeNotebookMap, setKnowledgeNotebookMap] = useState(new Map());
   const [knowledgeForm] = Form.useForm();
 
   const [brokerRows, setBrokerRows] = useState([]);
@@ -120,6 +194,52 @@ export default function InfoMaintain() {
       setKnowledgeCategories(res.data?.items || []);
     } catch {
       setKnowledgeCategories([]);
+    }
+  };
+
+  const loadKnowledgeDocs = async () => {
+    try {
+      const nbRes = await notebookApi.list();
+      const notebookRows = Array.isArray(nbRes.data) ? nbRes.data : [];
+      const notebookMap = new Map(notebookRows.map((row) => [row.id, row]));
+      setKnowledgeNotebookMap(notebookMap);
+
+      const caseRootIds = notebookRows
+        .filter((row) => ((row.name || '').trim() === '案例'))
+        .map((row) => row.id);
+      const caseNotebookIds = collectDescendantNotebookIds(caseRootIds, notebookRows);
+
+      const pageSize = 200;
+      let page = 1;
+      let allRows = [];
+      while (true) {
+        const res = await noteApi.list({ note_type: 'doc', page, size: pageSize });
+        const rows = Array.isArray(res.data) ? res.data : [];
+        allRows = allRows.concat(rows);
+        if (rows.length < pageSize) break;
+        page += 1;
+      }
+      const defaultRows = allRows.filter((row) => caseNotebookIds.has(row.notebook_id));
+      const options = defaultRows.map((row) => toDocOption(row, notebookMap));
+      setKnowledgeDocOptions(mergeNoteOptions([], options));
+    } catch {
+      message.error('文档列表加载失败');
+    }
+  };
+
+  const searchKnowledgeDocs = async (kw) => {
+    const keyword = (kw || '').trim();
+    if (!keyword) return;
+    try {
+      setKnowledgeDocSearching(true);
+      const res = await noteApi.search({ q: keyword, note_type: 'doc', limit: 80 });
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const options = rows.map((row) => toDocOption(row, knowledgeNotebookMap));
+      setKnowledgeDocOptions((prev) => mergeNoteOptions(prev, options));
+    } catch {
+      message.error('文档搜索失败');
+    } finally {
+      setKnowledgeDocSearching(false);
     }
   };
 
@@ -176,6 +296,7 @@ export default function InfoMaintain() {
 
   useEffect(() => {
     loadKnowledgeCategories();
+    loadKnowledgeDocs();
     loadKnowledge();
     loadBrokers();
   }, []);
@@ -192,15 +313,22 @@ export default function InfoMaintain() {
         status: 'active',
         priority: 'medium',
         tags: [],
+        related_note_ids: [],
       });
       return;
     }
+    const selectedDocOptions = (selectedKnowledge.related_notes || []).map((note) => ({
+      value: Number(note.id),
+      label: toDocOption(note, knowledgeNotebookMap).label,
+    }));
+    setKnowledgeDocOptions((prev) => mergeNoteOptions(prev, selectedDocOptions));
     knowledgeForm.setFieldsValue({
       ...selectedKnowledge,
       tags: normalizeTagList(selectedKnowledge.tags || selectedKnowledge.tags_text),
+      related_note_ids: (selectedKnowledge.related_notes || []).map((note) => note.id),
       due_date: selectedKnowledge.due_date ? dayjs(selectedKnowledge.due_date) : null,
     });
-  }, [selectedKnowledge, knowledgeForm]);
+  }, [selectedKnowledge, knowledgeForm, knowledgeNotebookMap]);
 
   useEffect(() => {
     if (!selectedBroker) {
@@ -224,6 +352,7 @@ export default function InfoMaintain() {
       status: 'active',
       priority: 'medium',
       tags: [],
+      related_note_ids: [],
     });
     setKnowledgeEditing(true);
   };
@@ -330,6 +459,7 @@ export default function InfoMaintain() {
     knowledgeForm.setFieldsValue({
       ...selectedKnowledge,
       tags: normalizeTagList(selectedKnowledge.tags || selectedKnowledge.tags_text),
+      related_note_ids: (selectedKnowledge.related_notes || []).map((note) => note.id),
       due_date: selectedKnowledge.due_date ? dayjs(selectedKnowledge.due_date) : null,
     });
     setKnowledgeEditing(true);
@@ -340,6 +470,7 @@ export default function InfoMaintain() {
       knowledgeForm.setFieldsValue({
         ...selectedKnowledge,
         tags: normalizeTagList(selectedKnowledge.tags || selectedKnowledge.tags_text),
+        related_note_ids: (selectedKnowledge.related_notes || []).map((note) => note.id),
         due_date: selectedKnowledge.due_date ? dayjs(selectedKnowledge.due_date) : null,
       });
       setKnowledgeEditing(false);
@@ -351,6 +482,7 @@ export default function InfoMaintain() {
       status: 'active',
       priority: 'medium',
       tags: [],
+      related_note_ids: [],
     });
     setKnowledgeEditing(false);
   };
@@ -492,7 +624,7 @@ export default function InfoMaintain() {
             <Col xs={24} xl={16}>
               <Card title={selectedKnowledgeId ? `知识 #${selectedKnowledgeId}` : '新建知识条目'} className="maintain-editor-card">
                 {knowledgeEditing ? (
-                  <Form form={knowledgeForm} layout="vertical" initialValues={{ category: 'pattern_dictionary', status: 'active', priority: 'medium', tags: [] }}>
+                  <Form form={knowledgeForm} layout="vertical" initialValues={{ category: 'pattern_dictionary', status: 'active', priority: 'medium', tags: [], related_note_ids: [] }}>
                     <Row gutter={12}>
                       <Col span={10}><Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}><Input placeholder="例如：趋势启动回调判定" /></Form.Item></Col>
                       <Col span={7}><Form.Item name="category" label="分类"><Select options={knowledgeCategoryOptions} /></Form.Item></Col>
@@ -504,6 +636,20 @@ export default function InfoMaintain() {
                       <Col span={24}>
                         <Form.Item name="tags" label="标签">
                           <Select mode="tags" tokenSeparators={[',', '，']} options={knowledgeTagOptions} placeholder="输入标签并回车" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={24}>
+                        <Form.Item name="related_note_ids" label="关联文档">
+                          <Select
+                            mode="multiple"
+                            allowClear
+                            showSearch
+                            optionFilterProp="label"
+                            options={knowledgeDocOptions}
+                            onSearch={searchKnowledgeDocs}
+                            placeholder="输入关键字搜索笔记文档并多选"
+                            notFoundContent={knowledgeDocSearching ? '搜索中...' : '无匹配文档'}
+                          />
                         </Form.Item>
                       </Col>
                       <Col span={24}><Form.Item name="summary" label="摘要"><TextArea rows={2} /></Form.Item></Col>
@@ -531,6 +677,20 @@ export default function InfoMaintain() {
                       <div>
                         <Typography.Text type="secondary">标签</Typography.Text>
                         <div style={{ marginTop: 4 }}>{selectedKnowledgeTags.map((t) => <Tag key={t}>{t}</Tag>)}</div>
+                      </div>
+                    ) : null}
+                    {(selectedKnowledge.related_notes || []).length > 0 ? (
+                      <div>
+                        <Typography.Text type="secondary">关联文档</Typography.Text>
+                        <div style={{ marginTop: 4 }}>
+                          <Space direction="vertical" size={2}>
+                            {(selectedKnowledge.related_notes || []).map((note) => (
+                              <a key={note.id} href={`/notes/?tab=doc&noteId=${note.id}`} target="_blank" rel="noreferrer">
+                                {toDocOption(note, knowledgeNotebookMap).label} (#{note.id})
+                              </a>
+                            ))}
+                          </Space>
+                        </div>
                       </div>
                     ) : null}
                     {selectedKnowledge.summary ? (

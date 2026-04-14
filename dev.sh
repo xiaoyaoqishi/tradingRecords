@@ -4,9 +4,10 @@ set -euo pipefail
 SESSION_NAME="trade-dev"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_DIR="$ROOT_DIR/.dev-run"
+DEV_LOG_MODE="${DEV_LOG_MODE:-file}" # file | none
 
 SERVICES=(
-  "backend|$ROOT_DIR/backend|DEV_MODE=1 python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
+  "backend|$ROOT_DIR/backend|DEV_MODE=1 python3 -m uvicorn main:app --host 127.0.0.1 --port 8000"
   "frontend|$ROOT_DIR/frontend|npm run dev"
   "notes|$ROOT_DIR/frontend-notes|npm run dev"
   "monitor|$ROOT_DIR/frontend-monitor|npm run dev"
@@ -74,13 +75,22 @@ start_bg() {
 
     (
       cd "$SERVICE_DIR"
-      nohup bash -lc "$SERVICE_CMD" >"$log_file" 2>&1 &
+      if [[ "$DEV_LOG_MODE" == "none" ]]; then
+        nohup bash -lc "$SERVICE_CMD" >/dev/null 2>&1 &
+        rm -f "$log_file"
+      else
+        nohup bash -lc "$SERVICE_CMD" >"$log_file" 2>&1 &
+      fi
       echo $! >"$pid_file"
     )
     echo "已启动: $SERVICE_NAME"
   done
 
-  echo "已启动(后台模式)，日志目录: .dev-run/"
+  if [[ "$DEV_LOG_MODE" == "none" ]]; then
+    echo "已启动(后台模式)，日志文件已禁用"
+  else
+    echo "已启动(后台模式)，日志目录: .dev-run/"
+  fi
 }
 
 start_session() {
@@ -151,6 +161,11 @@ attach_session() {
     fi
   fi
 
+  if [[ "$DEV_LOG_MODE" == "none" ]]; then
+    echo "后台日志已禁用(DEV_LOG_MODE=none)"
+    return
+  fi
+
   echo "没有可附着的会话或日志"
 }
 
@@ -207,6 +222,9 @@ usage() {
   attach   tmux附着或后台日志跟随
   status   查看运行状态
   restart  重启全部服务
+
+环境变量:
+  DEV_LOG_MODE=file|none   后台模式日志输出方式(默认 file)
 USAGE
 }
 

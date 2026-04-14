@@ -82,6 +82,9 @@ from trading.knowledge_service import (
     list_knowledge_items as _knowledge_list_knowledge_items,
     list_knowledge_categories as _knowledge_list_categories,
     normalize_knowledge_payload as _knowledge_normalize_payload,
+    normalize_related_note_ids as _knowledge_normalize_related_note_ids,
+    sync_knowledge_item_note_links as _knowledge_sync_note_links,
+    attach_knowledge_item_related_notes as _knowledge_attach_related_notes,
 )
 from trading.tag_service import (
     normalize_tag_list as _normalize_tag_list,
@@ -1399,7 +1402,8 @@ def list_knowledge_items(
         page=page,
         size=size,
     )
-    return _attach_knowledge_item_tags(db, rows)
+    rows = _attach_knowledge_item_tags(db, rows)
+    return _knowledge_attach_related_notes(db, rows)
 
 
 @app.get("/api/knowledge-items/categories")
@@ -1411,15 +1415,20 @@ def list_knowledge_item_categories(db: Session = Depends(get_db)):
 def create_knowledge_item(data: KnowledgeItemCreate, db: Session = Depends(get_db)):
     payload = _knowledge_normalize_payload(data.model_dump())
     tags_raw = payload.pop("tags", None) if "tags" in payload else None
+    related_note_ids_raw = payload.pop("related_note_ids", None) if "related_note_ids" in payload else None
     obj = KnowledgeItem(**payload)
     db.add(obj)
     db.flush()
     tag_names = _normalize_tag_list(tags_raw)
+    related_note_ids = _knowledge_normalize_related_note_ids(related_note_ids_raw)
     obj.tags_text = _serialize_legacy_tags(tag_names)
     _sync_knowledge_item_tags(db, obj.id, tag_names)
+    _knowledge_sync_note_links(db, obj.id, related_note_ids)
     db.commit()
     db.refresh(obj)
-    return _attach_knowledge_item_tags(db, [obj])[0]
+    rows = _attach_knowledge_item_tags(db, [obj])
+    rows = _knowledge_attach_related_notes(db, rows)
+    return rows[0]
 
 
 @app.get("/api/knowledge-items/{item_id}", response_model=KnowledgeItemResponse)
@@ -1427,7 +1436,9 @@ def get_knowledge_item(item_id: int, db: Session = Depends(get_db)):
     obj = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
     if not obj:
         raise HTTPException(404, "Knowledge item not found")
-    return _attach_knowledge_item_tags(db, [obj])[0]
+    rows = _attach_knowledge_item_tags(db, [obj])
+    rows = _knowledge_attach_related_notes(db, rows)
+    return rows[0]
 
 
 @app.put("/api/knowledge-items/{item_id}", response_model=KnowledgeItemResponse)
@@ -1437,6 +1448,7 @@ def update_knowledge_item(item_id: int, data: KnowledgeItemUpdate, db: Session =
         raise HTTPException(404, "Knowledge item not found")
     payload = _knowledge_normalize_payload(data.model_dump(exclude_unset=True))
     tags_raw = payload.pop("tags", None) if "tags" in payload else None
+    related_note_ids_raw = payload.pop("related_note_ids", None) if "related_note_ids" in payload else None
     for k, v in payload.items():
         setattr(obj, k, v)
     if tags_raw is not None:
@@ -1444,9 +1456,15 @@ def update_knowledge_item(item_id: int, data: KnowledgeItemUpdate, db: Session =
         obj.tags_text = _serialize_legacy_tags(tag_names)
         db.flush()
         _sync_knowledge_item_tags(db, obj.id, tag_names)
+    if related_note_ids_raw is not None:
+        related_note_ids = _knowledge_normalize_related_note_ids(related_note_ids_raw)
+        db.flush()
+        _knowledge_sync_note_links(db, obj.id, related_note_ids)
     db.commit()
     db.refresh(obj)
-    return _attach_knowledge_item_tags(db, [obj])[0]
+    rows = _attach_knowledge_item_tags(db, [obj])
+    rows = _knowledge_attach_related_notes(db, rows)
+    return rows[0]
 
 
 @app.delete("/api/knowledge-items/{item_id}")

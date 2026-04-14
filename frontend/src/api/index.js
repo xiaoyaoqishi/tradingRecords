@@ -87,4 +87,13 @@ export const knowledgeApi = {
   delete: (id) => api.delete(`/knowledge-items/${id}`),
 };
 
+export const noteApi = {
+  list: (params) => api.get('/notes', { params }),
+  search: (params) => api.get('/notes/search', { params }),
+};
+
+export const notebookApi = {
+  list: () => api.get('/notebooks'),
+};
+
 export default api;

@@ -28,6 +28,18 @@ def _create_review(client, review_type="daily", review_scope="periodic"):
     return resp.json()
 
 
+def _create_doc_note(client, title):
+    nb_resp = client.post("/api/notebooks", json={"name": f"知识文档目录-{title}"})
+    assert nb_resp.status_code == 200, nb_resp.text
+    notebook_id = nb_resp.json()["id"]
+    note_resp = client.post(
+        "/api/notes",
+        json={"notebook_id": notebook_id, "title": title, "content": f"{title} content", "note_type": "doc"},
+    )
+    assert note_resp.status_code == 200, note_resp.text
+    return note_resp.json()
+
+
 def test_review_trade_links_can_be_upserted_and_replaced(app_client):
     trade_a = _create_trade(app_client, symbol="IF", contract="IF2506")
     trade_b = _create_trade(app_client, symbol="IC", contract="IC2506", open_price=5200)
@@ -246,3 +258,62 @@ def test_knowledge_item_crud_filters_and_categories(app_client):
     assert delete_b.status_code == 200, delete_b.text
     get_b = app_client.get(f"/api/knowledge-items/{item_b['id']}")
     assert get_b.status_code == 404, get_b.text
+
+
+def test_knowledge_item_related_notes_crud_and_compat(app_client):
+    note_a = _create_doc_note(app_client, "知识文档A")
+    note_b = _create_doc_note(app_client, "知识文档B")
+    note_deleted = _create_doc_note(app_client, "将被删除文档")
+    del_resp = app_client.delete(f"/api/notes/{note_deleted['id']}")
+    assert del_resp.status_code == 200, del_resp.text
+
+    create_item = app_client.post(
+        "/api/knowledge-items",
+        json={
+            "category": "pattern_dictionary",
+            "title": "关联文档知识条目",
+            "summary": "with docs",
+            "source_ref": "legacy-source-ref",
+            "related_note_ids": [note_a["id"], note_b["id"], 999999, note_deleted["id"], note_a["id"]],
+        },
+    )
+    assert create_item.status_code == 200, create_item.text
+    created = create_item.json()
+    assert created["source_ref"] == "legacy-source-ref"
+    assert [x["id"] for x in created["related_notes"]] == [note_a["id"], note_b["id"]]
+
+    fetched = app_client.get(f"/api/knowledge-items/{created['id']}")
+    assert fetched.status_code == 200, fetched.text
+    assert [x["id"] for x in fetched.json()["related_notes"]] == [note_a["id"], note_b["id"]]
+
+    update_item = app_client.put(
+        f"/api/knowledge-items/{created['id']}",
+        json={"related_note_ids": [note_b["id"], note_a["id"]]},
+    )
+    assert update_item.status_code == 200, update_item.text
+    assert [x["id"] for x in update_item.json()["related_notes"]] == [note_b["id"], note_a["id"]]
+
+    clear_links = app_client.put(
+        f"/api/knowledge-items/{created['id']}",
+        json={"related_note_ids": []},
+    )
+    assert clear_links.status_code == 200, clear_links.text
+    assert clear_links.json()["related_notes"] == []
+
+    legacy_only = app_client.post(
+        "/api/knowledge-items",
+        json={
+            "category": "pattern_dictionary",
+            "title": "仅兼容字段",
+            "source_ref": "legacy-only",
+        },
+    )
+    assert legacy_only.status_code == 200, legacy_only.text
+    legacy_row = legacy_only.json()
+    assert legacy_row["source_ref"] == "legacy-only"
+    assert legacy_row["related_notes"] == []
+
+    delete_item = app_client.delete(f"/api/knowledge-items/{created['id']}")
+    assert delete_item.status_code == 200, delete_item.text
+    get_deleted = app_client.get(f"/api/knowledge-items/{created['id']}")
+    assert get_deleted.status_code == 404, get_deleted.text

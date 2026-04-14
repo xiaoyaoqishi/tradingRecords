@@ -33,7 +33,7 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 - Trade source metadata layer and source fallback parsing from legacy notes.
 - Review sessions as first-class objects (`/api/review-sessions`) with linked trades and filtered-slice generation.
 - Trade plans (`/api/trade-plans`) with enforced status transitions and links to trades/review sessions.
-- Knowledge base (`/api/knowledge-items`) with category/tag/status filtering.
+- Knowledge base (`/api/knowledge-items`) with category/tag/status filtering and multi-doc note links.
 - Notebook/notes/todo system with recycle bin and backlinks/search/calendar endpoints.
 - Image upload and serving (`/api/upload`, `/api/uploads/{filename}`).
 - Daily poem endpoint with remote fetch + local fallback cache (`/api/poem/daily`).
@@ -144,6 +144,7 @@ Repository-level:
 - `./dev.sh status`: check tmux/background service status.
 - `./dev.sh attach`: attach tmux session or tail logs.
 - `./dev.sh restart`: restart all services.
+- `DEV_LOG_MODE=none ./dev.sh up`: disable log files in background mode (`.dev-run/*.log`).
 
 Frontend modules (`frontend`, `frontend-notes`, `frontend-monitor`):
 - `npm run dev`
@@ -205,6 +206,13 @@ Frontend monitor app (`frontend-monitor`) polls these endpoints and renders dash
 - First-time auth setup requires `POST /api/auth/setup` before login is possible.
 - Frontend axios interceptors redirect `401` responses to `/login`.
 - Notes module and trading research panels upload images through `/api/upload`.
+- Knowledge item API fields:
+  - `POST/PUT /api/knowledge-items`: optional `related_note_ids: number[]` for linked doc notes (`note_type=doc` only).
+  - `GET /api/knowledge-items*`: returns `related_notes` (`id`, `title`, `note_type`, `updated_at`, `notebook_id`) for each item.
+- Notes deep-link query params (`/notes/`):
+  - `tab=doc|diary`
+  - `noteId=<number>`
+  - `anchor=<optional>`
 - The repository collaboration convention in `AGENTS.md` requires:
   - Use `./dev.sh` for local debug flow.
   - Use `deploy/update.sh` for production update flow.

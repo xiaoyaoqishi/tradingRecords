@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import IconSidebar from './components/IconSidebar';
 import HomePage from './components/HomePage';
 import DiaryView from './components/DiaryView';
@@ -8,10 +8,33 @@ import RecycleView from './components/RecycleView';
 import SettingsModal from './components/SettingsModal';
 import { notebookApi, noteApi } from './api';
 
+function parseInitialRouteFromUrl() {
+  const fallback = { tab: 'home', target: null };
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    const tab = (params.get('tab') || '').trim();
+    if (tab !== 'doc' && tab !== 'diary') return fallback;
+    const rawNoteId = (params.get('noteId') || '').trim();
+    const anchor = (params.get('anchor') || '').trim();
+    if (!rawNoteId) {
+      return { tab, target: null };
+    }
+    const noteId = Number(rawNoteId);
+    if (!Number.isInteger(noteId) || noteId <= 0) return fallback;
+    if (anchor) {
+      return { tab, target: { id: noteId, anchor } };
+    }
+    return { tab, target: noteId };
+  } catch {
+    return fallback;
+  }
+}
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState('home');
+  const initialRoute = useMemo(() => parseInitialRouteFromUrl(), []);
+  const [activeTab, setActiveTab] = useState(initialRoute.tab);
   const [notebooks, setNotebooks] = useState([]);
-  const [navigateTarget, setNavigateTarget] = useState(null);
+  const [navigateTarget, setNavigateTarget] = useState(initialRoute.target);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const targetId = (t) => (t && typeof t === 'object' ? t.id : t);
