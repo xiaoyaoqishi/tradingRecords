@@ -76,21 +76,70 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 .
 ├─ backend/
 │  ├─ main.py
+│  ├─ auth.py
+│  ├─ database.py
 │  ├─ models.py
 │  ├─ schemas.py
-│  ├─ database.py
-│  ├─ auth.py
+│  ├─ trade_review_taxonomy.py
 │  ├─ trading/
-│  └─ tests/
+│  │  ├─ analytics_service.py
+│  │  ├─ import_service.py
+│  │  ├─ knowledge_service.py
+│  │  ├─ review_service.py
+│  │  ├─ review_session_service.py
+│  │  ├─ source_service.py
+│  │  ├─ tag_service.py
+│  │  └─ trade_plan_service.py
+│  ├─ tests/
+│  │  ├─ conftest.py
+│  │  └─ test_*.py
+│  └─ data/
+│     ├─ trading.db
+│     ├─ uploads/
+│     └─ news_epub/
 ├─ frontend/
+│  ├─ src/
+│  │  ├─ api/
+│  │  ├─ components/
+│  │  ├─ features/trading/
+│  │  ├─ pages/
+│  │  └─ utils/
+│  ├─ index.html
+│  ├─ vite.config.js
+│  └─ package.json
 ├─ frontend-notes/
+│  ├─ src/
+│  │  ├─ api/
+│  │  ├─ components/
+│  │  └─ utils/
+│  ├─ index.html
+│  ├─ vite.config.js
+│  └─ package.json
 ├─ frontend-monitor/
+│  ├─ src/
+│  │  ├─ api.js
+│  │  ├─ App.jsx
+│  │  └─ main.jsx
+│  ├─ index.html
+│  ├─ vite.config.js
+│  └─ package.json
+├─ frontend-news/            # legacy directory, currently no package.json
 ├─ portal/
+│  ├─ index.html
+│  └─ login.html
 ├─ deploy/
+│  ├─ setup.sh
+│  ├─ update.sh
+│  ├─ remote-update.sh
+│  ├─ nginx.conf
+│  └─ trading.service
+├─ AGENTS.md
 ├─ dev.sh
 ├─ README.md
 └─ README.zh-CN.md
 ```
+
+(`node_modules`, `dist`, `.dev-run`, and other generated files are omitted.)
 
 ## 8. Getting Started
 Quick local start uses the repository-level script:
@@ -99,7 +148,7 @@ Quick local start uses the repository-level script:
 ./dev.sh up
 ```
 
-This starts backend + three frontend dev servers (tmux if available, otherwise background mode).
+This starts backend + all auto-discovered frontend dev servers (directories matching `frontend*` that contain `package.json` with a `dev` script), using tmux when available or background mode otherwise.
 
 ## 9. Prerequisites
 - Python 3
@@ -144,16 +193,16 @@ Repository ignore rules keep `.env` / `.env.*` out of Git while preserving `.env
 
 ## 12. Available Scripts
 Repository-level:
-- `./dev.sh up`: start all local services.
-- `./dev.sh down`: stop all local services.
+- `./dev.sh up`: start backend + all auto-discovered `frontend*` dev services.
+- `./dev.sh down`: stop all local services and force-clean leftover repo-local debug processes (`vite`/`npm run dev` and matching backend `uvicorn`).
 - `./dev.sh status`: check tmux/background service status.
 - `./dev.sh attach`: attach tmux session or tail logs.
 - `./dev.sh restart`: restart all services.
 - `DEV_LOG_MODE=none ./dev.sh up`: disable log files in background mode (`.dev-run/*.log`).
-- `./dev.sh down`: auto-cleans service pid/log files under `.dev-run` by default.
-- `DEV_CLEAN_ON_DOWN=0 ./dev.sh down`: keep `.dev-run` pid/log files when stopping services.
+- `./dev.sh down`: auto-cleans all `.dev-run` pid/log files by default (including legacy/manual logs).
+- `DEV_CLEAN_ON_DOWN=0 ./dev.sh down`: keep all `.dev-run` pid/log files when stopping services.
 
-Frontend modules (`frontend`, `frontend-notes`, `frontend-monitor`):
+Frontend modules (for example `frontend`, `frontend-notes`, `frontend-monitor`):
 - `npm run dev`
 - `npm run build`
 - `npm run preview`

@@ -76,21 +76,70 @@ Trading Records Workspace
 .
 ├─ backend/
 │  ├─ main.py
+│  ├─ auth.py
+│  ├─ database.py
 │  ├─ models.py
 │  ├─ schemas.py
-│  ├─ database.py
-│  ├─ auth.py
+│  ├─ trade_review_taxonomy.py
 │  ├─ trading/
-│  └─ tests/
+│  │  ├─ analytics_service.py
+│  │  ├─ import_service.py
+│  │  ├─ knowledge_service.py
+│  │  ├─ review_service.py
+│  │  ├─ review_session_service.py
+│  │  ├─ source_service.py
+│  │  ├─ tag_service.py
+│  │  └─ trade_plan_service.py
+│  ├─ tests/
+│  │  ├─ conftest.py
+│  │  └─ test_*.py
+│  └─ data/
+│     ├─ trading.db
+│     ├─ uploads/
+│     └─ news_epub/
 ├─ frontend/
+│  ├─ src/
+│  │  ├─ api/
+│  │  ├─ components/
+│  │  ├─ features/trading/
+│  │  ├─ pages/
+│  │  └─ utils/
+│  ├─ index.html
+│  ├─ vite.config.js
+│  └─ package.json
 ├─ frontend-notes/
+│  ├─ src/
+│  │  ├─ api/
+│  │  ├─ components/
+│  │  └─ utils/
+│  ├─ index.html
+│  ├─ vite.config.js
+│  └─ package.json
 ├─ frontend-monitor/
+│  ├─ src/
+│  │  ├─ api.js
+│  │  ├─ App.jsx
+│  │  └─ main.jsx
+│  ├─ index.html
+│  ├─ vite.config.js
+│  └─ package.json
+├─ frontend-news/            # 历史遗留目录，当前无 package.json
 ├─ portal/
+│  ├─ index.html
+│  └─ login.html
 ├─ deploy/
+│  ├─ setup.sh
+│  ├─ update.sh
+│  ├─ remote-update.sh
+│  ├─ nginx.conf
+│  └─ trading.service
+├─ AGENTS.md
 ├─ dev.sh
 ├─ README.md
 └─ README.zh-CN.md
 ```
+
+（已省略 `node_modules`、`dist`、`.dev-run` 等构建/运行期产物目录。）
 
 ## 8. 快速开始
 本地联调建议直接使用仓库根脚本：
@@ -99,7 +148,7 @@ Trading Records Workspace
 ./dev.sh up
 ```
 
-该命令会拉起 backend + 3 个 frontend 开发服务（有 tmux 则用 tmux，没有则后台运行）。
+该命令会拉起 backend + 自动发现的全部 frontend 开发服务（匹配 `frontend*` 目录且 `package.json` 中含 `dev` 脚本）；有 tmux 则用 tmux，没有则后台运行。
 
 ## 9. 前置要求
 - Python 3
@@ -144,15 +193,15 @@ npm install
 
 ## 12. 常用脚本
 仓库级：
-- `./dev.sh up`：启动全部本地服务。
-- `./dev.sh down`：停止全部本地服务。
+- `./dev.sh up`：启动 backend + 自动发现的全部 `frontend*` 本地开发服务。
+- `./dev.sh down`：停止全部本地服务，并兜底清理仓库内残留调试进程（`vite`/`npm run dev` 及匹配的后端 `uvicorn`）。
 - `./dev.sh status`：查看 tmux/后台进程状态。
 - `./dev.sh attach`：附着 tmux 或跟随日志。
 - `./dev.sh restart`：重启全部服务。
-- `./dev.sh down`：默认会自动清理 `.dev-run` 下服务 `pid/log` 文件。
-- `DEV_CLEAN_ON_DOWN=0 ./dev.sh down`：停止服务时保留 `.dev-run` 下 `pid/log` 文件。
+- `./dev.sh down`：默认会自动全量清理 `.dev-run` 下全部 `pid/log` 文件（含历史/手工日志）。
+- `DEV_CLEAN_ON_DOWN=0 ./dev.sh down`：停止服务时保留 `.dev-run` 下全部 `pid/log` 文件。
 
-前端子应用（`frontend`、`frontend-notes`、`frontend-monitor`）：
+前端子应用（如 `frontend`、`frontend-notes`、`frontend-monitor`）：
 - `npm run dev`
 - `npm run build`
 - `npm run preview`

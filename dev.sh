@@ -9,11 +9,9 @@ DEV_CLEAN_ON_DOWN="${DEV_CLEAN_ON_DOWN:-1}" # 1 | 0
 
 SERVICES=(
   "backend|$ROOT_DIR/backend|DEV_MODE=1 python3 -m uvicorn main:app --host 127.0.0.1 --port 8000"
-  "frontend|$ROOT_DIR/frontend|npm run dev"
-  "notes|$ROOT_DIR/frontend-notes|npm run dev"
-  "monitor|$ROOT_DIR/frontend-monitor|npm run dev"
 )
 PYTHON_CMD=""
+ORPHAN_PIDS=()
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -28,8 +26,9 @@ has_tmux() {
 
 ensure_base_deps() {
   require_cmd npm
+  require_cmd node
   resolve_python_cmd
-  SERVICES[0]="backend|$ROOT_DIR/backend|DEV_MODE=1 $PYTHON_CMD -m uvicorn main:app --host 127.0.0.1 --port 8000"
+  build_services
 }
 
 resolve_python_cmd() {
@@ -53,13 +52,133 @@ parse_service() {
   SERVICE_CMD="${rest#*|}"
 }
 
+has_dev_script() {
+  local pkg="$1"
+  node -e '
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+process.exit(pkg.scripts && pkg.scripts.dev ? 0 : 1);
+' "$pkg"
+}
+
+service_name_for_frontend_dir() {
+  local dir_name="$1"
+  case "$dir_name" in
+    frontend) echo "frontend" ;;
+    frontend-*) echo "${dir_name#frontend-}" ;;
+    *) echo "$dir_name" ;;
+  esac
+}
+
+has_service_name() {
+  local candidate="$1"
+  local svc
+  for svc in "${SERVICES[@]}"; do
+    parse_service "$svc"
+    if [[ "$SERVICE_NAME" == "$candidate" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+next_unique_service_name() {
+  local base="$1"
+  local candidate="$base"
+  local idx=2
+  while has_service_name "$candidate"; do
+    candidate="${base}${idx}"
+    idx=$((idx + 1))
+  done
+  echo "$candidate"
+}
+
+build_services() {
+  SERVICES=("backend|$ROOT_DIR/backend|DEV_MODE=1 $PYTHON_CMD -m uvicorn main:app --host 127.0.0.1 --port 8000")
+
+  local dir
+  for dir in "$ROOT_DIR"/frontend*; do
+    [[ -d "$dir" ]] || continue
+    local pkg="$dir/package.json"
+    [[ -f "$pkg" ]] || continue
+    if ! has_dev_script "$pkg"; then
+      continue
+    fi
+    local name
+    name="$(service_name_for_frontend_dir "$(basename "$dir")")"
+    name="$(next_unique_service_name "$name")"
+    SERVICES+=("$name|$dir|npm run dev")
+  done
+}
+
+append_orphan_pid() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 0
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  [[ "$pid" -eq $$ ]] && return 0
+
+  local existing
+  for existing in "${ORPHAN_PIDS[@]-}"; do
+    [[ "$existing" == "$pid" ]] && return 0
+  done
+  ORPHAN_PIDS+=("$pid")
+}
+
+collect_orphan_pids() {
+  ORPHAN_PIDS=()
+
+  while read -r pid ppid; do
+    append_orphan_pid "$pid"
+    local parent_cmd
+    parent_cmd="$(ps -p "$ppid" -o command= 2>/dev/null || true)"
+    if [[ "$parent_cmd" == *"npm run dev"* ]]; then
+      append_orphan_pid "$ppid"
+    fi
+  done < <(
+    ps -eo pid=,ppid=,command= | awk -v root="$ROOT_DIR/" '
+      index($0, root) && index($0, "/node_modules/.bin/vite") { print $1 " " $2 }
+    '
+  )
+
+  while read -r pid; do
+    append_orphan_pid "$pid"
+  done < <(
+    ps -eo pid=,command= | awk '
+      index($0, "uvicorn main:app --host 127.0.0.1 --port 8000") { print $1 }
+    '
+  )
+}
+
+stop_orphan_dev_processes() {
+  collect_orphan_pids
+  if [[ ${#ORPHAN_PIDS[@]} -eq 0 ]]; then
+    echo "未发现残留调试进程"
+    return 0
+  fi
+
+  kill "${ORPHAN_PIDS[@]}" 2>/dev/null || true
+  sleep 1
+
+  local survivors=()
+  local pid
+  for pid in "${ORPHAN_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      survivors+=("$pid")
+    fi
+  done
+
+  if [[ ${#survivors[@]} -gt 0 ]]; then
+    kill -9 "${survivors[@]}" 2>/dev/null || true
+  fi
+
+  echo "已清理残留调试进程: ${ORPHAN_PIDS[*]}"
+}
+
 cleanup_run_artifacts() {
   [[ -d "$RUN_DIR" ]] || return 0
 
-  for svc in "${SERVICES[@]}"; do
-    parse_service "$svc"
-    rm -f "$RUN_DIR/$SERVICE_NAME.pid" "$RUN_DIR/$SERVICE_NAME.log"
-  done
+  # 全量清理 .dev-run 下调试产物（含历史 manual 日志）
+  rm -f "$RUN_DIR"/*.pid "$RUN_DIR"/*.log
 
   # 若目录为空则顺手移除，避免残留空目录
   if [[ -z "$(ls -A "$RUN_DIR" 2>/dev/null)" ]]; then
@@ -176,9 +295,10 @@ stop_session() {
     stop_tmux
   fi
   stop_bg
+  stop_orphan_dev_processes
   if [[ "$DEV_CLEAN_ON_DOWN" == "1" ]]; then
     cleanup_run_artifacts
-    echo "已清理调试产物: .dev-run/{*.pid,*.log}"
+    echo "已全量清理调试产物: .dev-run/{*.pid,*.log}"
   fi
 }
 
