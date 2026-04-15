@@ -30,10 +30,13 @@ Trading Records Workspace
 - 持仓视图（`/api/trades/positions`）。
 - 结构化交易复盘分类体系与单笔复盘元数据。
 - 图文研究录入默认包含标准复盘字段（入场论点、证据、边界、管理动作、离场原因）。
+- 图文研究编辑支持所见即所得文字样式（加粗/斜体/背景高亮）与图片粘贴上传。
 - 交易来源元数据层，并兼容从旧 notes 文本回退提取来源。
 - 复盘会话（`/api/review-sessions`）作为一等对象，支持关联交易和按筛选条件生成样本。
 - 交易计划（`/api/trade-plans`）及状态流转校验，可关联交易与复盘会话。
 - 知识库（`/api/knowledge-items`），支持分类/标签/状态筛选。
+- 信息维护/复盘会话工作台左侧改为文件夹分组视图，支持单分类展开与紧凑条目展示。
+- 文件夹内支持“优先级优先 + 维护时间”排序（同优先级按维护时间更早优先）。
 - 交易模块回收站：成交记录、知识、券商、复盘会话、交易计划支持删除后恢复（`/api/recycle/*`）。
 - 笔记本/笔记/待办系统，含回收站、反向链接、搜索、日历接口。
 - 图片上传与访问（`/api/upload`、`/api/uploads/{filename}`）。
@@ -137,6 +140,7 @@ npm install
 | `JINRISHICI_TOKEN` | 空 | 诗词接口可选请求令牌。 |
 
 仓库根目录已补充最小可用 `.env.example`。
+仓库忽略规则会屏蔽 `.env` / `.env.*`，并保留 `.env.example` 模板。
 
 ## 12. 常用脚本
 仓库级：
@@ -145,6 +149,8 @@ npm install
 - `./dev.sh status`：查看 tmux/后台进程状态。
 - `./dev.sh attach`：附着 tmux 或跟随日志。
 - `./dev.sh restart`：重启全部服务。
+- `./dev.sh down`：默认会自动清理 `.dev-run` 下服务 `pid/log` 文件。
+- `DEV_CLEAN_ON_DOWN=0 ./dev.sh down`：停止服务时保留 `.dev-run` 下 `pid/log` 文件。
 
 前端子应用（`frontend`、`frontend-notes`、`frontend-monitor`）：
 - `npm run dev`
@@ -218,7 +224,7 @@ cd ../frontend-monitor && npm run build
   - 本地调试统一使用 `./dev.sh`。
   - 生产更新统一使用 `deploy/update.sh`。
   - 推送前优先检查 `frontend-notes` 可构建。
-  - 涉及笔记模块改动时同步更新 README 与接口清单说明。
+  - 每次推送前同步更新 `README.md` 与 `README.zh-CN.md`。
 
 ## 19. 后续计划
 基于当前代码形态的保守方向：

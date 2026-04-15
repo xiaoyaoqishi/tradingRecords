@@ -30,10 +30,13 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 - Open position view (`/api/trades/positions`).
 - Structured trade review taxonomy + per-trade review metadata.
 - Research content modal now includes standard review fields (entry thesis, evidence, boundary, management, exit reason) by default.
+- Research content editor supports WYSIWYG text styling (bold/italic/highlight background) with image paste/upload.
 - Trade source metadata layer and source fallback parsing from legacy notes.
 - Review sessions as first-class objects (`/api/review-sessions`) with linked trades and filtered-slice generation.
 - Trade plans (`/api/trade-plans`) with enforced status transitions and links to trades/review sessions.
 - Knowledge base (`/api/knowledge-items`) with category/tag/status filtering and multi-doc note links.
+- Knowledge/review workspaces use folder-style grouped sidebars with single-expand behavior and compact item cards.
+- Sidebar ordering supports priority-first + maintenance-time ordering (same priority sorted by earlier update time first).
 - Trading recycle bin for five domains: trades, knowledge items, brokers, review sessions, trade plans (`/api/recycle/*` restore/purge endpoints).
 - Notebook/notes/todo system with recycle bin and backlinks/search/calendar endpoints.
 - Image upload and serving (`/api/upload`, `/api/uploads/{filename}`).
@@ -137,6 +140,7 @@ The backend reads environment variables directly from process env (no dotenv loa
 | `JINRISHICI_TOKEN` | empty | Optional token for poem API request header. |
 
 A minimal `.env.example` is included at repository root.
+Repository ignore rules keep `.env` / `.env.*` out of Git while preserving `.env.example`.
 
 ## 12. Available Scripts
 Repository-level:
@@ -146,6 +150,8 @@ Repository-level:
 - `./dev.sh attach`: attach tmux session or tail logs.
 - `./dev.sh restart`: restart all services.
 - `DEV_LOG_MODE=none ./dev.sh up`: disable log files in background mode (`.dev-run/*.log`).
+- `./dev.sh down`: auto-cleans service pid/log files under `.dev-run` by default.
+- `DEV_CLEAN_ON_DOWN=0 ./dev.sh down`: keep `.dev-run` pid/log files when stopping services.
 
 Frontend modules (`frontend`, `frontend-notes`, `frontend-monitor`):
 - `npm run dev`
@@ -226,7 +232,7 @@ Frontend monitor app (`frontend-monitor`) polls these endpoints and renders dash
   - Use `./dev.sh` for local debug flow.
   - Use `deploy/update.sh` for production update flow.
   - Check `frontend-notes` build before pushing.
-  - Update README + interface list when changing notes module behavior.
+  - Update both `README.md` and `README.zh-CN.md` before each push.
 
 ## 19. Roadmap
 Conservative, codebase-driven near-term directions:
