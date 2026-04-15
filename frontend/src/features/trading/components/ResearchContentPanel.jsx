@@ -14,13 +14,25 @@ import {
   Typography,
   message,
 } from 'antd';
-import { DeleteOutlined, PictureOutlined } from '@ant-design/icons';
+import {
+  BgColorsOutlined,
+  BoldOutlined,
+  DeleteOutlined,
+  ItalicOutlined,
+  PictureOutlined,
+} from '@ant-design/icons';
 import api from '../../../api';
 
 const { TextArea } = Input;
 const IMG_TAG_RE = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
 const IMAGE_MD_RE = /!\[[^\]]*]\(([^)\s]+)\)/g;
 const FORMAT_KIND = 'research_v2';
+const HIGHLIGHT_PRESETS = [
+  { label: '黄', value: '#fff59d' },
+  { label: '绿', value: '#d9f7be' },
+  { label: '蓝', value: '#bae7ff' },
+  { label: '粉', value: '#ffd6e7' },
+];
 const STANDARD_FIELD_DEFS = [
   { key: 'entry_thesis', label: '入场论点', placeholder: '记录本次入场的核心论点' },
   { key: 'invalidation_valid_evidence', label: '有效证据', placeholder: '哪些证据支持当前判断' },
@@ -51,6 +63,106 @@ function stripHtmlToText(html) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .trim();
+}
+
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function plainTextToHtml(text) {
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
+function isHtmlLike(text) {
+  return /<[a-z][\s\S]*>/i.test(String(text || ''));
+}
+
+function sanitizeInlineStyle(styleText) {
+  const out = [];
+  const rules = String(styleText || '')
+    .split(';')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  for (const rule of rules) {
+    const idx = rule.indexOf(':');
+    if (idx <= 0) continue;
+    const prop = rule.slice(0, idx).trim().toLowerCase();
+    const val = rule.slice(idx + 1).trim();
+    if (!val) continue;
+    if (prop === 'background-color') {
+      if (/^(#[0-9a-f]{3,8}|rgba?\([^)]*\)|hsla?\([^)]*\)|[a-z]+)$/i.test(val)) {
+        out.push(`background-color: ${val}`);
+      }
+      continue;
+    }
+    if (prop === 'font-weight') {
+      if (/^(normal|bold|[1-9]00)$/i.test(val)) out.push(`font-weight: ${val}`);
+      continue;
+    }
+    if (prop === 'font-style') {
+      if (/^(normal|italic)$/i.test(val)) out.push(`font-style: ${val}`);
+    }
+  }
+  return out.join('; ');
+}
+
+function sanitizeRichTextHtml(rawHtml) {
+  const source = String(rawHtml || '');
+  if (!source.trim()) return '';
+  if (typeof document === 'undefined') return plainTextToHtml(stripHtmlToText(source));
+
+  try {
+    const allowedTags = new Set(['STRONG', 'B', 'EM', 'I', 'SPAN', 'P', 'DIV', 'BR']);
+    const template = document.createElement('template');
+    template.innerHTML = source;
+
+    const cleanContainer = document.createElement('div');
+    const TEXT_NODE = 3;
+    const ELEMENT_NODE = 1;
+
+    const walk = (node, parent) => {
+      if (node.nodeType === TEXT_NODE) {
+        parent.appendChild(document.createTextNode(node.nodeValue || ''));
+        return;
+      }
+      if (node.nodeType !== ELEMENT_NODE) return;
+
+      const tag = (node.tagName || '').toUpperCase();
+      if (!allowedTags.has(tag)) {
+        Array.from(node.childNodes || []).forEach((child) => walk(child, parent));
+        return;
+      }
+
+      const normalizedTag = tag === 'B' ? 'strong' : tag === 'I' ? 'em' : tag.toLowerCase();
+      const el = document.createElement(normalizedTag);
+      const styleText = sanitizeInlineStyle(node.getAttribute('style') || '');
+      if (styleText) el.setAttribute('style', styleText);
+
+      Array.from(node.childNodes || []).forEach((child) => walk(child, el));
+      parent.appendChild(el);
+    };
+
+    Array.from(template.content.childNodes || []).forEach((child) => walk(child, cleanContainer));
+    return cleanContainer.innerHTML.trim();
+  } catch {
+    return plainTextToHtml(stripHtmlToText(source));
+  }
+}
+
+function normalizeBodyForEditor(raw) {
+  const text = String(raw || '');
+  if (!text.trim()) return '';
+  return isHtmlLike(text) ? sanitizeRichTextHtml(text) : plainTextToHtml(text);
+}
+
+function normalizeBodyForStorage(raw) {
+  const html = sanitizeRichTextHtml(raw);
+  return stripHtmlToText(html) ? html : '';
 }
 
 function extractImageUrls(raw) {
@@ -151,9 +263,16 @@ export default function ResearchContentPanel({
   const uploadRef = useRef(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
+  const editorRef = useRef(null);
+  const editorBodyRef = useRef('');
+  const [editorSeed, setEditorSeed] = useState(0);
+  const [editorInitialHtml, setEditorInitialHtml] = useState('');
 
   const openModal = () => {
     const latest = parseResearchValue(value);
+    editorBodyRef.current = String(latest.body || '');
+    setEditorInitialHtml(normalizeBodyForEditor(latest.body));
+    setEditorSeed((n) => n + 1);
     setDraft({
       ...latest,
       standardFields: showStandardFields
@@ -164,9 +283,11 @@ export default function ResearchContentPanel({
   };
 
   const saveModal = () => {
-    onChange?.(serializeResearchValue(draft));
+    const editorBody = editorRef.current ? editorRef.current.innerHTML : editorBodyRef.current;
+    const nextDraft = { ...draft, body: normalizeBodyForStorage(editorBody) };
+    onChange?.(serializeResearchValue(nextDraft));
     if (showStandardFields) {
-      onStandardFieldsChange?.(normalizeStandardFields(draft.standardFields));
+      onStandardFieldsChange?.(normalizeStandardFields(nextDraft.standardFields));
     }
     setModalOpen(false);
   };
@@ -236,12 +357,31 @@ export default function ResearchContentPanel({
     await uploadImages(imageFiles);
   };
 
+  const applyEditorCommand = (command, value = null) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    try {
+      if (command === 'hiliteColor') {
+        document.execCommand('styleWithCSS', false, 'true');
+        const ok = document.execCommand('hiliteColor', false, value);
+        if (!ok) document.execCommand('backColor', false, value);
+      } else {
+        document.execCommand(command, false, value);
+      }
+    } catch {
+      message.warning('当前浏览器对该格式命令支持有限');
+    }
+    editorBodyRef.current = editor.innerHTML;
+  };
+
   const readonlyData = { ...parsed, standardFields: mergedStandardFields };
+  const readonlyBodyHtml = useMemo(() => normalizeBodyForEditor(readonlyData.body), [readonlyData.body]);
 
   if (!editing) {
-    const hasText = String(readonlyData.body || '').trim().length > 0;
+    const hasText = stripHtmlToText(readonlyBodyHtml).length > 0;
     const hasImages = (readonlyData.images || []).length > 0;
-  const hasStandardFields = showStandardFields && Object.values(readonlyData.standardFields || {}).some((x) => String(x || '').trim());
+    const hasStandardFields = showStandardFields && Object.values(readonlyData.standardFields || {}).some((x) => String(x || '').trim());
     if (!hasText && !hasImages && !hasStandardFields) {
       return <Empty description="暂无图文研究记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
     }
@@ -259,9 +399,10 @@ export default function ResearchContentPanel({
           }}
         >
           {hasText ? (
-            <Typography.Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: hasImages ? 12 : 0 }}>
-              {readonlyData.body}
-            </Typography.Paragraph>
+            <div
+              style={{ marginBottom: hasImages ? 12 : 0, lineHeight: 1.7 }}
+              dangerouslySetInnerHTML={{ __html: readonlyBodyHtml }}
+            />
           ) : null}
           {hasStandardFields ? (
             <div style={{ marginBottom: hasImages ? 12 : 0 }}>
@@ -366,15 +507,46 @@ export default function ResearchContentPanel({
 
           <div>
             <Typography.Text type="secondary">研究文本</Typography.Text>
-            <TextArea
-              rows={6}
-              value={draft.body}
-              onChange={(e) => setDraft((prev) => ({ ...prev, body: e.target.value }))}
+            <Space wrap style={{ margin: '8px 0' }}>
+              <Button size="small" icon={<BoldOutlined />} onMouseDown={(e) => e.preventDefault()} onClick={() => applyEditorCommand('bold')}>加粗</Button>
+              <Button size="small" icon={<ItalicOutlined />} onMouseDown={(e) => e.preventDefault()} onClick={() => applyEditorCommand('italic')}>斜体</Button>
+              <Button size="small" icon={<BgColorsOutlined />} onMouseDown={(e) => e.preventDefault()} onClick={() => applyEditorCommand('removeFormat')}>清除格式</Button>
+              {HIGHLIGHT_PRESETS.map((preset) => (
+                <Button
+                  key={preset.value}
+                  size="small"
+                  style={{ background: preset.value, borderColor: '#d9d9d9' }}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyEditorCommand('hiliteColor', preset.value)}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </Space>
+            <div
+              key={editorSeed}
+              ref={editorRef}
+              contentEditable
+              suppressContentEditableWarning
+              dangerouslySetInnerHTML={{ __html: editorInitialHtml }}
+              onInput={(e) => { editorBodyRef.current = e.currentTarget.innerHTML; }}
               onPaste={handlePasteImage}
-              placeholder="记录你的研究结论、证据链、复盘要点..."
+              style={{
+                minHeight: 160,
+                maxHeight: 360,
+                overflowY: 'auto',
+                border: '1px solid #d9d9d9',
+                borderRadius: 8,
+                padding: '10px 12px',
+                lineHeight: 1.7,
+                outline: 'none',
+                background: '#fff',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
             />
             <Typography.Text type="secondary" style={{ marginTop: 6, display: 'inline-block' }}>
-              支持 Ctrl+V 直接粘贴截图到图片列表
+              选中文字后可加粗、斜体、背景色；支持 Ctrl+V 粘贴截图
             </Typography.Text>
           </div>
 

@@ -4,5 +4,6 @@
 
 - 本地调试统一使用 `./dev.sh`（up/status/attach/down/restart）。
 - 生产部署统一使用 `deploy/update.sh`。
-- 推送前优先检查：`frontend-notes` 是否可构建。
-- 涉及笔记模块变更时，同步更新 `README.md` 对应说明与接口清单。
+- 优化时要额外考虑易用性与美观
+- 上传仓库前需要基于项目情况更新readme中英文文档，更新完再上传仓库
+- 回复需要尽可能的简短精炼

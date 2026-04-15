@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   DatePicker,
   Descriptions,
   Empty,
@@ -19,7 +20,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, FolderOpenOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useSearchParams } from 'react-router-dom';
 import { reviewSessionApi, tradeApi } from '../api';
@@ -156,6 +157,7 @@ export default function ReviewList() {
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [minStars, setMinStars] = useState(undefined);
   const [selectedId, setSelectedId] = useState(initialSessionIdFromQuery);
+  const [expandedScope, setExpandedScope] = useState(null);
   const [linkedTrades, setLinkedTrades] = useState([]);
   const [tradeOptions, setTradeOptions] = useState([]);
   const [tradeOptionLoading, setTradeOptionLoading] = useState(false);
@@ -171,6 +173,48 @@ export default function ReviewList() {
     const set = new Set();
     rows.forEach((r) => normalizeTagList(r.tags).forEach((t) => set.add(t)));
     return Array.from(set).map((x) => ({ value: x, label: x }));
+  }, [rows]);
+
+  const groupedRows = useMemo(() => {
+    const priorityRank = { high: 0, medium: 1, low: 2 };
+    const normalizedScope = (item) => (item?.review_scope || '').trim() || 'custom';
+    const maintenanceTs = (item) => {
+      const updated = item?.updated_at ? new Date(item.updated_at).getTime() : NaN;
+      if (Number.isFinite(updated)) return updated;
+      const created = item?.created_at ? new Date(item.created_at).getTime() : NaN;
+      if (Number.isFinite(created)) return created;
+      return Number.MAX_SAFE_INTEGER;
+    };
+    const priorityWeight = (item) => {
+      const p = String(item?.priority || '').trim().toLowerCase();
+      if (priorityRank[p] !== undefined) return priorityRank[p];
+      const stars = Number(item?.star_rating || 0);
+      if (Number.isFinite(stars) && stars > 0) return 10 - stars;
+      return 99;
+    };
+    const compareSession = (a, b) => {
+      const pa = priorityWeight(a);
+      const pb = priorityWeight(b);
+      if (pa !== pb) return pa - pb;
+      const ta = maintenanceTs(a);
+      const tb = maintenanceTs(b);
+      if (ta !== tb) return ta - tb;
+      return (Number(a?.id) || 0) - (Number(b?.id) || 0);
+    };
+
+    const groups = new Map();
+    for (const item of rows) {
+      const scope = normalizedScope(item);
+      if (!groups.has(scope)) groups.set(scope, []);
+      groups.get(scope).push(item);
+    }
+    return Array.from(groups.entries())
+      .map(([scope, items]) => ({
+        scope,
+        label: mapLabel(REVIEW_SCOPE_ZH, scope || 'custom'),
+        items: [...items].sort(compareSession),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
   }, [rows]);
 
   const linkedTradeIds = useMemo(() => {
@@ -327,6 +371,16 @@ export default function ReviewList() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    if (!rows.length) {
+      setExpandedScope(null);
+      return;
+    }
+    if (expandedScope && !rows.some((x) => ((x.review_scope || '').trim() || 'custom') === expandedScope)) {
+      setExpandedScope(null);
+    }
+  }, [rows, expandedScope]);
+
   useEffect(() => () => {
     if (tradeSearchTimerRef.current) clearTimeout(tradeSearchTimerRef.current);
   }, []);
@@ -414,6 +468,14 @@ export default function ReviewList() {
 
   const removeLinkedTrade = (index) => setLinkedTrades((prev) => prev.filter((_, i) => i !== index));
 
+  const selectSession = (item) => {
+    const scope = (item?.review_scope || '').trim() || 'custom';
+    setExpandedScope(scope);
+    setSelectedId(item.id);
+    resetForm(item);
+    setEditing(false);
+  };
+
   return (
     <div className="review-workspace">
       <Card className="review-toolbar" bodyStyle={{ padding: 12 }}>
@@ -437,27 +499,62 @@ export default function ReviewList() {
 
       <Row gutter={12}>
         <Col xs={24} xl={8}>
-          <Card title="复盘会话" className="review-list-card" loading={loading}>
-            <List
-              dataSource={rows}
-              locale={{ emptyText: <Empty description="暂无会话" /> }}
-              renderItem={(item) => (
-                <List.Item className={`review-list-item ${item.id === selectedId ? 'active' : ''}`} onClick={() => { setSelectedId(item.id); resetForm(item); setEditing(false); }}>
-                  <div className="review-list-main">
-                    <div className="review-list-title">{item.title || `Session #${item.id}`}</div>
-                    <div className="review-list-meta">
-                      <Tag>{kindLabel(item.review_kind)}</Tag>
-                      <Tag color="blue">{mapLabel(REVIEW_SCOPE_ZH, item.review_scope || 'custom')}</Tag>
-                      <Tag color="gold">关联 {item.linked_trade_ids?.length || 0}</Tag>
-                      <Rate disabled value={item.star_rating || 0} style={{ fontSize: 12 }} />
+          <Card className="review-list-card" loading={loading}>
+            {groupedRows.length === 0 ? (
+              <Empty description="暂无会话" />
+            ) : (
+              <Collapse
+                accordion
+                bordered={false}
+                className="review-folder-collapse"
+                activeKey={expandedScope || undefined}
+                onChange={(key) => {
+                  const nextKey = Array.isArray(key) ? key[0] : key;
+                  setExpandedScope(nextKey ? String(nextKey) : null);
+                }}
+                items={groupedRows.map((group) => ({
+                  key: group.scope,
+                  label: (
+                    <div className="review-folder-label">
+                      <span className="review-folder-name">
+                        <span className="review-folder-icon">
+                          {expandedScope === group.scope ? <FolderOpenOutlined /> : <FolderOutlined />}
+                        </span>
+                        {group.label}
+                      </span>
+                      <span className="review-folder-count">{group.items.length}</span>
                     </div>
-                    <Typography.Paragraph className="review-list-summary" ellipsis={{ rows: 2 }}>
-                      {item.summary || item.review_goal || item.selection_basis || '无摘要'}
-                    </Typography.Paragraph>
-                  </div>
-                </List.Item>
-              )}
-            />
+                  ),
+                  children: (
+                    <List
+                      dataSource={group.items}
+                      locale={{ emptyText: <Empty description="该分类下暂无会话" /> }}
+                      renderItem={(item) => {
+                        const itemTags = normalizeTagList(item.tags);
+                        return (
+                          <List.Item className={`review-list-item review-list-child-item ${item.id === selectedId ? 'active' : ''}`} onClick={() => selectSession(item)}>
+                            <div className="review-list-main">
+                              <div className="review-list-head">
+                                <div className="review-list-title" title={item.title || `Session #${item.id}`}>{item.title || `Session #${item.id}`}</div>
+                                <div className="review-list-meta">
+                                  <Tag className="review-mini-tag">{kindLabel(item.review_kind)}</Tag>
+                                  <Tag className="review-mini-tag" color="gold">★{item.star_rating || 0}</Tag>
+                                </div>
+                              </div>
+                              {itemTags.length > 0 ? (
+                                <div className="review-list-tags">
+                                  {itemTags.map((tag) => <Tag key={`${item.id}-${tag}`}>{tag}</Tag>)}
+                                </div>
+                              ) : null}
+                            </div>
+                          </List.Item>
+                        );
+                      }}
+                    />
+                  ),
+                }))}
+              />
+            )}
           </Card>
         </Col>
 
@@ -569,4 +666,3 @@ export default function ReviewList() {
     </div>
   );
 }
-

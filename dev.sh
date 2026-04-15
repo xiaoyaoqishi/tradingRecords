@@ -5,6 +5,7 @@ SESSION_NAME="trade-dev"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_DIR="$ROOT_DIR/.dev-run"
 DEV_LOG_MODE="${DEV_LOG_MODE:-file}" # file | none
+DEV_CLEAN_ON_DOWN="${DEV_CLEAN_ON_DOWN:-1}" # 1 | 0
 
 SERVICES=(
   "backend|$ROOT_DIR/backend|DEV_MODE=1 python3 -m uvicorn main:app --host 127.0.0.1 --port 8000"
@@ -50,6 +51,20 @@ parse_service() {
   local rest="${line#*|}"
   SERVICE_DIR="${rest%%|*}"
   SERVICE_CMD="${rest#*|}"
+}
+
+cleanup_run_artifacts() {
+  [[ -d "$RUN_DIR" ]] || return 0
+
+  for svc in "${SERVICES[@]}"; do
+    parse_service "$svc"
+    rm -f "$RUN_DIR/$SERVICE_NAME.pid" "$RUN_DIR/$SERVICE_NAME.log"
+  done
+
+  # 若目录为空则顺手移除，避免残留空目录
+  if [[ -z "$(ls -A "$RUN_DIR" 2>/dev/null)" ]]; then
+    rmdir "$RUN_DIR" 2>/dev/null || true
+  fi
 }
 
 start_tmux() {
@@ -161,6 +176,10 @@ stop_session() {
     stop_tmux
   fi
   stop_bg
+  if [[ "$DEV_CLEAN_ON_DOWN" == "1" ]]; then
+    cleanup_run_artifacts
+    echo "已清理调试产物: .dev-run/{*.pid,*.log}"
+  fi
 }
 
 attach_session() {
@@ -240,6 +259,7 @@ usage() {
 
 环境变量:
   DEV_LOG_MODE=file|none   后台模式日志输出方式(默认 file)
+  DEV_CLEAN_ON_DOWN=1|0    down 后是否自动清理 .dev-run 下 pid/log(默认 1)
 USAGE
 }
 

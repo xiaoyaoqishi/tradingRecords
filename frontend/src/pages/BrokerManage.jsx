@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   DatePicker,
   Descriptions,
   Empty,
@@ -18,7 +19,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, FolderOpenOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { brokerApi, knowledgeApi, noteApi, notebookApi } from '../api';
 import {
@@ -38,9 +39,11 @@ const { TextArea, Search } = Input;
 const KNOWLEDGE_STATUS_OPTIONS = dictToOptions(KNOWLEDGE_STATUS_ZH);
 const KNOWLEDGE_PRIORITY_OPTIONS = dictToOptions(KNOWLEDGE_PRIORITY_ZH);
 
-function tagsToSummary(raw) {
-  const tags = normalizeTagList(raw);
-  return tags.length ? tags.join('、') : '';
+function knowledgePriorityColor(priority) {
+  const key = String(priority || '').trim().toLowerCase();
+  if (key === 'high') return '#a8071a';
+  if (key === 'low') return 'green';
+  return 'gold';
 }
 
 function normalizeKnowledgePayload(values) {
@@ -159,6 +162,7 @@ export default function InfoMaintain() {
   const [knowledgeDocOptions, setKnowledgeDocOptions] = useState([]);
   const [knowledgeDocSearching, setKnowledgeDocSearching] = useState(false);
   const [knowledgeNotebookMap, setKnowledgeNotebookMap] = useState(new Map());
+  const [knowledgeExpandedCategory, setKnowledgeExpandedCategory] = useState(null);
   const [knowledgeForm] = Form.useForm();
 
   const [brokerRows, setBrokerRows] = useState([]);
@@ -190,6 +194,42 @@ export default function InfoMaintain() {
     const set = new Set();
     knowledgeRows.forEach((item) => normalizeTagList(item.tags || item.tags_text).forEach((tag) => set.add(tag)));
     return Array.from(set).map((x) => ({ value: x, label: x }));
+  }, [knowledgeRows]);
+
+  const knowledgeGroupedRows = useMemo(() => {
+    const priorityRank = { high: 0, medium: 1, low: 2 };
+    const maintenanceTs = (item) => {
+      const updated = item?.updated_at ? new Date(item.updated_at).getTime() : NaN;
+      if (Number.isFinite(updated)) return updated;
+      const created = item?.created_at ? new Date(item.created_at).getTime() : NaN;
+      if (Number.isFinite(created)) return created;
+      return Number.MAX_SAFE_INTEGER;
+    };
+    const compareKnowledgeItem = (a, b) => {
+      const pa = priorityRank[a?.priority] ?? 99;
+      const pb = priorityRank[b?.priority] ?? 99;
+      if (pa !== pb) return pa - pb;
+
+      const ta = maintenanceTs(a);
+      const tb = maintenanceTs(b);
+      if (ta !== tb) return ta - tb;
+
+      return (Number(a?.id) || 0) - (Number(b?.id) || 0);
+    };
+
+    const groups = new Map();
+    for (const item of knowledgeRows) {
+      const category = (item.category || '').trim() || 'uncategorized';
+      if (!groups.has(category)) groups.set(category, []);
+      groups.get(category).push(item);
+    }
+    return Array.from(groups.entries())
+      .map(([category, items]) => ({
+        category,
+        label: category === 'uncategorized' ? '未分类' : mapLabel(KNOWLEDGE_CATEGORY_ZH, category),
+        items: [...items].sort(compareKnowledgeItem),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
   }, [knowledgeRows]);
 
   const loadKnowledgeCategories = async () => {
@@ -308,6 +348,14 @@ export default function InfoMaintain() {
   useEffect(() => {
     loadKnowledge();
   }, [knowledgeFilters.category, knowledgeFilters.status, knowledgeFilters.tag, knowledgeFilters.q]);
+
+  useEffect(() => {
+    if (!knowledgeRows.length) {
+      setKnowledgeExpandedCategory(null);
+    } else if (knowledgeExpandedCategory && !knowledgeRows.some((x) => ((x.category || '').trim() || 'uncategorized') === knowledgeExpandedCategory)) {
+      setKnowledgeExpandedCategory(null);
+    }
+  }, [knowledgeRows, knowledgeExpandedCategory]);
 
   useEffect(() => {
     if (!selectedKnowledge) {
@@ -454,6 +502,11 @@ export default function InfoMaintain() {
   };
 
   const selectKnowledge = (id) => {
+    const next = knowledgeRows.find((x) => x.id === id);
+    const nextCategory = (next?.category || '').trim() || 'uncategorized';
+    if (nextCategory) {
+      setKnowledgeExpandedCategory(nextCategory);
+    }
     setSelectedKnowledgeId(id);
     setKnowledgeEditing(false);
   };
@@ -599,37 +652,67 @@ export default function InfoMaintain() {
 
           <Row gutter={12}>
             <Col xs={24} xl={8}>
-              <Card title="知识条目" className="maintain-list-card" loading={knowledgeLoading}>
-                <List
-                  dataSource={knowledgeRows}
-                  locale={{ emptyText: <Empty description="暂无知识条目" /> }}
-                  renderItem={(item) => {
-                    const itemTags = normalizeTagList(item.tags || item.tags_text);
-                    return (
-                      <List.Item
-                        className={`maintain-list-item ${item.id === selectedKnowledgeId ? 'active' : ''}`}
-                        onClick={() => selectKnowledge(item.id)}
-                      >
-                        <div className="maintain-list-main">
-                          <div className="maintain-list-title">{item.title}</div>
-                          <div className="maintain-list-meta">
-                            <Tag color="blue">{mapLabel(KNOWLEDGE_CATEGORY_ZH, item.category)}</Tag>
-                            <Tag>{mapLabel(KNOWLEDGE_STATUS_ZH, item.status)}</Tag>
-                            <Tag color="gold">{mapLabel(KNOWLEDGE_PRIORITY_ZH, item.priority)}</Tag>
-                          </div>
-                          {itemTags.length > 0 ? (
-                            <div className="maintain-list-tags">
-                              {itemTags.map((t) => <Tag key={`${item.id}-${t}`} color={getTagColor(t)}>{t}</Tag>)}
-                            </div>
-                          ) : null}
-                          <Typography.Paragraph className="maintain-list-summary" ellipsis={{ rows: 2 }}>
-                            {item.summary || item.next_action || tagsToSummary(item.tags || item.tags_text) || '无摘要'}
-                          </Typography.Paragraph>
+              <Card className="maintain-list-card" loading={knowledgeLoading}>
+                {knowledgeGroupedRows.length === 0 ? (
+                  <Empty description="暂无知识条目" />
+                ) : (
+                  <Collapse
+                    accordion
+                    bordered={false}
+                    className="maintain-folder-collapse"
+                    activeKey={knowledgeExpandedCategory || undefined}
+                    onChange={(key) => {
+                      const nextKey = Array.isArray(key) ? key[0] : key;
+                      setKnowledgeExpandedCategory(nextKey ? String(nextKey) : null);
+                    }}
+                    items={knowledgeGroupedRows.map((group) => ({
+                      key: group.category,
+                      label: (
+                        <div className="maintain-folder-label">
+                          <span className="maintain-folder-name">
+                            <span className="maintain-folder-icon">
+                              {knowledgeExpandedCategory === group.category ? <FolderOpenOutlined /> : <FolderOutlined />}
+                            </span>
+                            {group.label}
+                          </span>
+                          <span className="maintain-folder-count">{group.items.length}</span>
                         </div>
-                      </List.Item>
-                    );
-                  }}
-                />
+                      ),
+                      children: (
+                        <List
+                          dataSource={group.items}
+                          locale={{ emptyText: <Empty description="该分类下暂无知识" /> }}
+                          renderItem={(item) => {
+                            const itemTags = normalizeTagList(item.tags || item.tags_text);
+                            return (
+                              <List.Item
+                                className={`maintain-list-item maintain-list-child-item ${item.id === selectedKnowledgeId ? 'active' : ''}`}
+                                onClick={() => selectKnowledge(item.id)}
+                              >
+                                <div className="maintain-list-main">
+                                  <div className="maintain-list-head">
+                                    <div className="maintain-list-title" title={item.title}>{item.title}</div>
+                                    <div className="maintain-list-meta">
+                                      <Tag className="maintain-mini-tag">{mapLabel(KNOWLEDGE_STATUS_ZH, item.status)}</Tag>
+                                      <Tag className="maintain-mini-tag" color={knowledgePriorityColor(item.priority)}>
+                                        {mapLabel(KNOWLEDGE_PRIORITY_ZH, item.priority)}
+                                      </Tag>
+                                    </div>
+                                  </div>
+                                  {itemTags.length > 0 ? (
+                                    <div className="maintain-list-tags">
+                                      {itemTags.map((t) => <Tag key={`${item.id}-${t}`} color={getTagColor(t)}>{t}</Tag>)}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </List.Item>
+                            );
+                          }}
+                        />
+                      ),
+                    }))}
+                  />
+                )}
               </Card>
             </Col>
 
@@ -694,7 +777,11 @@ export default function InfoMaintain() {
                       <Descriptions.Item label="标题">{selectedKnowledge.title || '-'}</Descriptions.Item>
                       <Descriptions.Item label="分类">{mapLabel(KNOWLEDGE_CATEGORY_ZH, selectedKnowledge.category)}</Descriptions.Item>
                       <Descriptions.Item label="状态">{mapLabel(KNOWLEDGE_STATUS_ZH, selectedKnowledge.status)}</Descriptions.Item>
-                      <Descriptions.Item label="优先级">{mapLabel(KNOWLEDGE_PRIORITY_ZH, selectedKnowledge.priority)}</Descriptions.Item>
+                      <Descriptions.Item label="优先级">
+                        <Tag color={knowledgePriorityColor(selectedKnowledge.priority)}>
+                          {mapLabel(KNOWLEDGE_PRIORITY_ZH, selectedKnowledge.priority)}
+                        </Tag>
+                      </Descriptions.Item>
                       <Descriptions.Item label="关联品种">{selectedKnowledgeSymbolLabel}</Descriptions.Item>
                       <Descriptions.Item label="关联结构">{selectedKnowledge.related_pattern || '-'}</Descriptions.Item>
                       <Descriptions.Item label="关联环境">{selectedKnowledge.related_regime || '-'}</Descriptions.Item>
