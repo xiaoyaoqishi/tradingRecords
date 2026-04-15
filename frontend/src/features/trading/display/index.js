@@ -1,6 +1,20 @@
 import { formatFuturesSymbol } from '../../../utils/futures';
 import { REVIEW_LINK_ROLE_ZH, mapLabel, getTaxonomyLabel } from '../localization';
 
+const TAG_COLOR_PALETTE = [
+  'magenta',
+  'red',
+  'volcano',
+  'orange',
+  'gold',
+  'lime',
+  'green',
+  'cyan',
+  'blue',
+  'geekblue',
+  'purple',
+];
+
 export function normalizeTagList(raw) {
   if (raw == null) return [];
   const values = Array.isArray(raw) ? raw : String(raw).split(/[,\n;|，、]+/);
@@ -15,6 +29,16 @@ export function normalizeTagList(raw) {
     out.push(name);
   });
   return out;
+}
+
+export function getTagColor(rawTag) {
+  const tag = String(rawTag || '').trim();
+  if (!tag) return 'default';
+  let hash = 0;
+  for (let i = 0; i < tag.length; i += 1) {
+    hash = (hash * 131 + tag.charCodeAt(i)) >>> 0;
+  }
+  return TAG_COLOR_PALETTE[hash % TAG_COLOR_PALETTE.length];
 }
 
 export function formatInstrumentDisplay(symbol = '', contract = '', fallback = '-') {

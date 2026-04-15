@@ -28,7 +28,7 @@ import {
   dictToOptions,
   mapLabel,
 } from '../features/trading/localization';
-import { formatInstrumentDisplay, normalizeTagList } from '../features/trading/display';
+import { formatInstrumentDisplay, getTagColor, normalizeTagList } from '../features/trading/display';
 import ReadEditActions from '../features/trading/components/ReadEditActions';
 import './BrokerManage.css';
 
@@ -602,24 +602,32 @@ export default function InfoMaintain() {
                 <List
                   dataSource={knowledgeRows}
                   locale={{ emptyText: <Empty description="暂无知识条目" /> }}
-                  renderItem={(item) => (
-                    <List.Item
-                      className={`maintain-list-item ${item.id === selectedKnowledgeId ? 'active' : ''}`}
-                      onClick={() => selectKnowledge(item.id)}
-                    >
-                      <div className="maintain-list-main">
-                        <div className="maintain-list-title">{item.title}</div>
-                        <div className="maintain-list-meta">
-                          <Tag color="blue">{mapLabel(KNOWLEDGE_CATEGORY_ZH, item.category)}</Tag>
-                          <Tag>{mapLabel(KNOWLEDGE_STATUS_ZH, item.status)}</Tag>
-                          <Tag color="gold">{mapLabel(KNOWLEDGE_PRIORITY_ZH, item.priority)}</Tag>
+                  renderItem={(item) => {
+                    const itemTags = normalizeTagList(item.tags || item.tags_text);
+                    return (
+                      <List.Item
+                        className={`maintain-list-item ${item.id === selectedKnowledgeId ? 'active' : ''}`}
+                        onClick={() => selectKnowledge(item.id)}
+                      >
+                        <div className="maintain-list-main">
+                          <div className="maintain-list-title">{item.title}</div>
+                          <div className="maintain-list-meta">
+                            <Tag color="blue">{mapLabel(KNOWLEDGE_CATEGORY_ZH, item.category)}</Tag>
+                            <Tag>{mapLabel(KNOWLEDGE_STATUS_ZH, item.status)}</Tag>
+                            <Tag color="gold">{mapLabel(KNOWLEDGE_PRIORITY_ZH, item.priority)}</Tag>
+                          </div>
+                          {itemTags.length > 0 ? (
+                            <div className="maintain-list-tags">
+                              {itemTags.map((t) => <Tag key={`${item.id}-${t}`} color={getTagColor(t)}>{t}</Tag>)}
+                            </div>
+                          ) : null}
+                          <Typography.Paragraph className="maintain-list-summary" ellipsis={{ rows: 2 }}>
+                            {item.summary || item.next_action || tagsToSummary(item.tags || item.tags_text) || '无摘要'}
+                          </Typography.Paragraph>
                         </div>
-                        <Typography.Paragraph className="maintain-list-summary" ellipsis={{ rows: 2 }}>
-                          {item.summary || item.next_action || tagsToSummary(item.tags || item.tags_text) || '无摘要'}
-                        </Typography.Paragraph>
-                      </div>
-                    </List.Item>
-                  )}
+                      </List.Item>
+                    );
+                  }}
                 />
               </Card>
             </Col>
@@ -681,7 +689,9 @@ export default function InfoMaintain() {
                     {selectedKnowledgeTags.length > 0 ? (
                       <div>
                         <Typography.Text type="secondary">标签</Typography.Text>
-                        <div style={{ marginTop: 4 }}>{selectedKnowledgeTags.map((t) => <Tag key={t}>{t}</Tag>)}</div>
+                        <div style={{ marginTop: 4 }}>
+                          {selectedKnowledgeTags.map((t) => <Tag key={t} color={getTagColor(t)}>{t}</Tag>)}
+                        </div>
                       </div>
                     ) : null}
                     {(selectedKnowledge.related_notes || []).length > 0 ? (

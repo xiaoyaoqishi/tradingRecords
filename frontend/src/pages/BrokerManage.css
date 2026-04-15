@@ -62,6 +62,10 @@
   color: #5a6575;
 }
 
+.maintain-list-tags {
+  margin: 0 0 6px;
+}
+
 @media (max-width: 1200px) {
   .maintain-toolbar-inner {
     flex-direction: column;
