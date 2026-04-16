@@ -14,6 +14,16 @@
       overflow-x: hidden;
       overflow-y: auto;
       background: #d1cbc0;
+      position: relative;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      background: rgba(255, 255, 255, 0.38);
     }
 
     .video-bg {
@@ -49,7 +59,6 @@
       font-weight: 400;
       letter-spacing: 0.6rem;
       color: #3a3530;
-      text-shadow: 0 2px 14px rgba(245,240,232,0.45);
     }
 
     .brand .slogan {
@@ -76,6 +85,18 @@
       letter-spacing: 0.15rem;
     }
 
+    .brand h1,
+    .brand .slogan,
+    .clock .date,
+    .clock .time,
+    .poem .title,
+    .poem .line,
+    .poem .meta,
+    .nav-item .name,
+    .nav-item .desc {
+      text-shadow: 0 0 8px rgba(255, 255, 255, 0.9), 0 0 4px rgba(255, 255, 255, 0.8);
+    }
+
     /* ── 中部主区域：撑满剩余空间，居中诗词 ── */
     .main-area {
       flex: 1;
@@ -88,20 +109,19 @@
     /* ── 诗词区：居中、楷体、大字 ── */
     .poem {
       width: min(940px, 94%);
-      padding: 32px 40px;
+      padding: 24px 16px;
       position: relative;
-      background: rgba(245, 240, 232, 0.24);
-      backdrop-filter: blur(10px);
+      background: transparent;
+      backdrop-filter: none;
       text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
     }
     .poem::before,
     .poem::after {
-      content: '';
-      position: absolute;
-      left: 8%;
-      right: 8%;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(80,70,55,0.35), transparent);
+      display: none;
     }
     .poem::before { top: 0; }
     .poem::after { bottom: 0; }
@@ -116,7 +136,17 @@
       align-items: center;
       justify-content: center;
       gap: 14px;
-      margin-bottom: 20px;
+      margin-bottom: 0;
+    }
+
+    .poem-vertical-wrap {
+      display: flex;
+      flex-direction: row-reverse;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 16px;
+      max-width: 100%;
+      min-height: clamp(280px, 52vh, 520px);
     }
     .poem-refresh-btn {
       width: 28px;
@@ -142,33 +172,41 @@
     .poem .line {
       font-family: 'KaiTi', 'STKaiti', 'AR PL UKai CN', 'Noto Serif SC', serif;
       font-size: clamp(24px, 3vw, 32px);
-      line-height: 2.3;
-      letter-spacing: 0.15rem;
+      line-height: 1.9;
+      letter-spacing: 0.1rem;
       color: #2e2a25;
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
       white-space: pre-wrap;
+      height: clamp(280px, 52vh, 520px);
+      max-width: min(72vw, 14em);
+      overflow: hidden;
+      margin: 0;
+      text-align: left;
     }
     .poem .line.collapsed {
-      max-height: 10em;
+      max-width: min(72vw, 14em);
       overflow: hidden;
       position: relative;
     }
     .poem .line.expanded {
-      max-height: 42vh;
-      overflow-y: auto;
-      padding-right: 6px;
+      max-width: min(88vw, 34em);
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding-bottom: 6px;
     }
     .poem .line.collapsed::after {
-      content: '';
-      position: absolute;
-      left: 0; right: 0; bottom: 0;
-      height: 3.2em;
-      background: linear-gradient(180deg, rgba(218,213,203,0) 0%, rgba(218,213,203,0.8) 100%);
+      content: none;
     }
     .poem .meta {
-      margin-top: 18px;
-      color: #756a5b;
-      font-size: clamp(14px, 1.2vw, 16px);
-      letter-spacing: 0.18rem;
+      margin-top: 10px;
+      writing-mode: horizontal-tb;
+      text-orientation: mixed;
+      color: #6d6152;
+      font-size: clamp(15px, 1.3vw, 17px);
+      letter-spacing: 0.1rem;
+      text-align: center;
+      align-self: center;
     }
     .poem-toggle {
       margin-top: 14px;
@@ -214,7 +252,8 @@
       position: absolute;
       inset: 8px;
       border-radius: 8px;
-      background: radial-gradient(ellipse at center, rgba(245,240,232,0.5) 0%, transparent 70%);
+      background: rgba(255, 255, 255, 0.14);
+      box-shadow: 0 0 16px rgba(255, 255, 255, 0.24);
       opacity: 0;
       transition: opacity 0.4s ease;
       z-index: 0;
@@ -258,8 +297,8 @@
     }
 
     .nav-item .desc {
-      font-size: 13px;
-      color: #7d7367;
+      font-size: 15px;
+      color: #655b4f;
       margin-top: 10px;
       letter-spacing: 0.08rem;
       text-align: center;
@@ -311,13 +350,39 @@
         align-self: center;
       }
       .nav-item { flex: none; padding: 22px 20px; }
-      .poem .line { font-size: clamp(20px, 4.5vw, 26px); }
+      .poem { padding: 20px 8px; gap: 12px; }
+      .poem-vertical-wrap {
+        min-height: clamp(240px, 50vh, 460px);
+        gap: 10px;
+      }
+      .poem .line {
+        font-size: clamp(20px, 4.5vw, 26px);
+        height: clamp(240px, 50vh, 460px);
+        max-width: min(78vw, 12em);
+      }
+      .poem .line.collapsed {
+        max-width: min(78vw, 12em);
+      }
+      .poem .line.expanded {
+        max-width: min(92vw, 28em);
+      }
+      .poem .meta {
+        font-size: clamp(14px, 3.2vw, 16px);
+      }
     }
 
     @media (max-width: 600px) {
       .nav-item .seal { width: 48px; height: 48px; font-size: 20px; }
       .nav-item .name { letter-spacing: 0.2rem; }
-      .poem { padding: 24px 20px; }
+      .poem {
+        padding: 18px 8px;
+      }
+      .poem-vertical-wrap {
+        min-height: clamp(220px, 46vh, 380px);
+      }
+      .poem .line {
+        height: clamp(220px, 46vh, 380px);
+      }
     }
   </style>
 </head>
@@ -344,7 +409,9 @@
         <div class="title">每日一诗</div>
         <button class="poem-refresh-btn" id="poemRefreshBtn" title="换一首">↻</button>
       </div>
-      <div class="line" id="poemLine"></div>
+      <div class="poem-vertical-wrap">
+        <div class="line" id="poemLine"></div>
+      </div>
       <div class="meta" id="poemMeta"></div>
       <button class="poem-toggle" id="poemToggle" style="display:none;">展开全文</button>
     </div>

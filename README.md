@@ -39,6 +39,7 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 - Knowledge/review workspaces use folder-style grouped sidebars with single-expand behavior and compact item cards.
 - Trading / review / plan / maintenance workspaces now use a narrower grouped left panel (desktop `xl`), with more room for the main editor/content area.
 - UI readability pass: lighter non-white workspace background and stronger visual emphasis for key fields (stat titles, labels, dropdowns, action buttons, workspace headers, and trade-detail metadata sections).
+- Portal homepage readability pass: added a global ultra-light white overlay, softened text lift shadows, switched the daily poem section to traditional vertical layout, removed the poem blur card, and improved bottom nav subtitle contrast/size.
 - Sidebar ordering supports priority-first + maintenance-time ordering (same priority sorted by earlier update time first).
 - Trading recycle bin for five domains: trades, knowledge items, brokers, review sessions, trade plans (`/api/recycle/*` restore/purge endpoints).
 - Notebook/notes/todo system with recycle bin and backlinks/search/calendar endpoints.

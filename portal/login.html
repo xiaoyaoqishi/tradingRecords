@@ -13,6 +13,16 @@
       overflow: hidden;
       color: #3a3a3a;
       background: #d1cbc0;
+      position: relative;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      background: rgba(255, 255, 255, 0.38);
     }
 
     .video-bg {
@@ -41,17 +51,12 @@
       max-width: 92vw;
       padding: 56px 52px 52px;
       position: relative;
-      background: rgba(245, 240, 232, 0.22);
-      backdrop-filter: blur(20px);
+      background: rgba(245, 240, 232, 0.14);
+      backdrop-filter: none;
     }
     .login-panel::before,
     .login-panel::after {
-      content: '';
-      position: absolute;
-      left: 10%;
-      right: 10%;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(100, 85, 60, 0.35), transparent);
+      display: none;
     }
     .login-panel::before { top: 0; }
     .login-panel::after { bottom: 0; }
@@ -82,13 +87,19 @@
       letter-spacing: 0.5rem;
       color: #3a3530;
       margin-bottom: 12px;
-      text-shadow: 0 2px 10px rgba(245,240,232,0.35);
     }
 
     .login-header .subtitle {
       font-size: 0.95rem;
       color: #8a7d6b;
       letter-spacing: 0.25rem;
+    }
+
+    .login-header h1,
+    .login-header .subtitle,
+    .form-group label,
+    .footer {
+      text-shadow: 0 0 8px rgba(255, 255, 255, 0.9), 0 0 4px rgba(255, 255, 255, 0.8);
     }
 
     .form-group {
