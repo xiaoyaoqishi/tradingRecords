@@ -19,7 +19,7 @@ Trading Records Workspace
 - `backend`：FastAPI 应用、领域模型、接口、鉴权、数据迁移、监控采样。
 - `frontend`：交易前端（记录、分析、复盘会话、交易计划、知识库、券商维护）。
 - `frontend-notes`：笔记前端（日记/文档、富文本编辑、Wiki 链接、回收站、待办）。
-- `frontend-monitor`：监控前端（系统、进程、网络、磁盘、服务状态）。
+- `frontend-monitor`：网站监控前端（服务器监控、站点可用性巡检、用户管理、浏览记录）。
 - `portal`：门户首页与登录页。
 - `deploy`：生产脚本（`setup.sh`、`update.sh`）、Nginx 配置、systemd 服务文件。
 - `dev.sh`：本地联调统一编排脚本。
@@ -41,12 +41,20 @@ Trading Records Workspace
 - 界面可读性增强：在保持非白背景的前提下整体提亮，并强化关键字段视觉层级（统计标题、表单标签、下拉项、功能按钮、工作台标题、交易详情关键信息）。
 - 门户首页可读性优化：增加全局轻薄白色遮罩、统一文字柔和提亮阴影、“每日一诗”改为传统竖排并移除白色模糊底，同时增强底部导航副标题对比度与字号。
 - 每日诗词排版细化：按传统从右向左改为“标题列（右）- 正文列（中）- 落款列（左）”，将出处作者移至最左侧作为落款，并提升正文 `letter-spacing`/`line-height` 以增强长短句呼吸感。
+- 交易前端默认落地页调整为首页仪表盘（`/trading/` 默认跳转 `/trading/dashboard`），不再默认进入交易记录列表。
+- 门户首页“每日一诗”的展开/收起改为小图标按钮，放在“换一首”下方并保持同列竖排交互。
 - 文件夹内支持“优先级优先 + 维护时间”排序（同优先级按维护时间更早优先）。
 - 交易模块回收站：成交记录、知识、券商、复盘会话、交易计划支持删除后恢复（`/api/recycle/*`）。
 - 笔记本/笔记/待办系统，含回收站、反向链接、搜索、日历接口。
 - 图片上传与访问（`/api/upload`、`/api/uploads/{filename}`）。
 - 每日诗词接口，支持远程获取 + 本地兜底缓存（`/api/poem/daily`）。
-- 服务器监控接口（`/api/monitor/realtime`、`/api/monitor/history`），基于 `psutil`。
+- 多用户鉴权（固定角色 `admin` / `user`），迁移后 `xiaoyao` 为管理员账号。
+- 业务数据按 `owner_role` 角色域隔离（`admin` 可看全量；`user` 仅看 `user` 域）。
+- 网站监控应用升级为子模块结构：服务器监控、站点巡检、用户管理、浏览记录。
+- 监控权限双保险：前端隐藏 + 后端鉴权拦截（普通用户访问监控/管理接口返回 `403`）。
+- 站点巡检目标管理与结果历史接口（`/api/monitor/sites*`）。
+- 浏览/操作记录接口（`/api/audit/track`、`/api/audit/logs`），含管理员记录，保留 180 天。
+- 服务器监控接口（`/api/monitor/realtime`、`/api/monitor/history`）基于 `psutil` 且仅管理员可用。
 - 非开发模式下 `/api/*` 的 Cookie 鉴权中间件。
 - `./dev.sh down` 的残留进程清理已增强，兼容混合 shell/Windows 场景（更宽松的 Vite 识别 + 进程树终止）。
 
@@ -68,14 +76,15 @@ Trading Records Workspace
   - `/notes/` -> `frontend-notes/dist`
   - `/monitor/` -> `frontend-monitor/dist`
   - `/api/*` -> FastAPI（`127.0.0.1:8000`）
-- FastAPI 负责业务接口、上传、鉴权、诗词与监控数据。
+- FastAPI 负责业务接口、上传、鉴权、诗词、监控、用户管理与审计日志接口。
 - 鉴权策略：
-  - `DEV_MODE=1` 时跳过 API 鉴权中间件。
+  - `DEV_MODE=1` 时接口默认使用管理员开发上下文。
   - 非开发模式下，除白名单鉴权接口外，`/api/*` 需有效 `session_token` Cookie。
+  - 用户信息存储于数据库 `users` 表；旧 `backend/data/auth.json` 会自动迁移为 `xiaoyao/admin`。
 - 数据流：
   - 持久化数据进 SQLite（`backend/data`）。
   - 上传图片落地到 `backend/data/uploads`。
-  - 鉴权账号与签名密钥文件保存在 `backend/data`。
+- 签名密钥文件保存在 `backend/data/.secret`；`auth.json` 仅作兼容保留。
 
 ## 7. 目录结构
 ```text
@@ -273,8 +282,19 @@ cd ../frontend-monitor && npm run build
 `frontend-monitor` 周期轮询上述接口并展示图表面板。
 
 ## 18. 使用说明或注意事项
-- 首次使用需先调用 `POST /api/auth/setup` 初始化账号，否则无法登录。
+- 首次使用需先调用 `POST /api/auth/setup` 初始化账号，系统会创建管理员 `xiaoyao`。
 - 前端 Axios 拦截 `401` 并跳转 `/login`。
+- 管理员接口：
+  - `GET/POST /api/admin/users`
+  - `POST /api/admin/users/{id}/toggle-active`
+  - `POST /api/admin/users/{id}/reset-password`
+- 监控接口：
+  - `GET /api/monitor/realtime`、`GET /api/monitor/history`（仅管理员）
+  - `GET/POST /api/monitor/sites`、`PUT/DELETE /api/monitor/sites/{id}`
+  - `GET /api/monitor/sites/{id}/results`
+- 审计接口：
+  - `POST /api/audit/track`
+  - `GET /api/audit/logs`（仅管理员）
 - 笔记编辑器与交易研究面板图片都通过 `/api/upload` 上传。
 - 交易模块回收站接口：
   - `GET /api/recycle/{trades|knowledge-items|trade-brokers|review-sessions|trade-plans}`

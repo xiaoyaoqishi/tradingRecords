@@ -6,7 +6,7 @@ import DocView from './components/DocView';
 import TodoView from './components/TodoView';
 import RecycleView from './components/RecycleView';
 import SettingsModal from './components/SettingsModal';
-import { notebookApi, noteApi } from './api';
+import { notebookApi, noteApi, auditApi } from './api';
 
 function parseInitialRouteFromUrl() {
   const fallback = { tab: 'home', target: null };
@@ -48,6 +48,9 @@ export default function App() {
   }, []);
 
   useEffect(() => { loadNotebooks(); }, [loadNotebooks]);
+  useEffect(() => {
+    auditApi.track({ path: '/notes/', module: 'notes', detail: `tab:${activeTab}` }).catch(() => {});
+  }, [activeTab]);
 
   const handleNavigate = (tab, target) => {
     setNavigateTarget(target);

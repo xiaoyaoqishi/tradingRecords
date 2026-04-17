@@ -19,7 +19,7 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 - `backend`: FastAPI application, domain models, API endpoints, auth, data migration, monitoring metrics.
 - `frontend`: Trading app (records, analytics, review sessions, trade plans, knowledge items, broker maintenance).
 - `frontend-notes`: Notes app (diary/doc notes, rich-text editor, wiki links, recycle bin, to-do).
-- `frontend-monitor`: Monitoring app (system, process, network, disk, service status).
+- `frontend-monitor`: Website monitoring app (server monitor, site availability checks, user admin, audit logs).
 - `portal`: Static homepage and login page.
 - `deploy`: Production scripts (`setup.sh`, `update.sh`), `nginx` config, `systemd` service.
 - `dev.sh`: Unified local development orchestration script.
@@ -41,12 +41,20 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 - UI readability pass: lighter non-white workspace background and stronger visual emphasis for key fields (stat titles, labels, dropdowns, action buttons, workspace headers, and trade-detail metadata sections).
 - Portal homepage readability pass: added a global ultra-light white overlay, softened text lift shadows, switched the daily poem section to traditional vertical layout, removed the poem blur card, and improved bottom nav subtitle contrast/size.
 - Daily poem typography refinement: reorganized into right-to-left vertical columns (title/right, poem/body, inscription/left), moved attribution to the left as a signature line, and increased body spacing (`letter-spacing`/`line-height`) for calmer long-short sentence rhythm.
+- Trading app default landing route now opens dashboard (`/trading/` -> `/trading/dashboard`) instead of trade list.
+- Daily poem expand/collapse is now a compact icon button under the refresh icon, aligned in the same vertical control column.
 - Sidebar ordering supports priority-first + maintenance-time ordering (same priority sorted by earlier update time first).
 - Trading recycle bin for five domains: trades, knowledge items, brokers, review sessions, trade plans (`/api/recycle/*` restore/purge endpoints).
 - Notebook/notes/todo system with recycle bin and backlinks/search/calendar endpoints.
 - Image upload and serving (`/api/upload`, `/api/uploads/{filename}`).
 - Daily poem endpoint with remote fetch + local fallback cache (`/api/poem/daily`).
-- Server monitor APIs (`/api/monitor/realtime`, `/api/monitor/history`) backed by `psutil`.
+- Multi-user auth with fixed roles (`admin` / `user`), where `xiaoyao` is the admin account after migration.
+- Role-domain data isolation on business entities via `owner_role` (`admin` can view all domains; `user` sees only `user` domain).
+- Website monitor app with submodules: server monitor, site availability checks, user management, and browse/audit logs.
+- Monitor access control is enforced both in frontend visibility and backend authorization (`user` gets `403` on monitor/admin APIs).
+- Site monitor target CRUD + polling result history APIs (`/api/monitor/sites*`).
+- Browse tracking APIs (`/api/audit/track`, `/api/audit/logs`) with 180-day retention, including admin activity.
+- Server monitor APIs (`/api/monitor/realtime`, `/api/monitor/history`) backed by `psutil` and restricted to admin.
 - Cookie-based authentication middleware for `/api/*` in non-dev mode.
 - `./dev.sh down` orphan cleanup is hardened for mixed shell/Windows scenarios (broader Vite process matching + process-tree termination).
 
@@ -68,14 +76,15 @@ The backend uses SQLite and stores runtime data under `backend/data`.
   - `/notes/` -> `frontend-notes/dist`
   - `/monitor/` -> `frontend-monitor/dist`
   - `/api/*` -> FastAPI (`127.0.0.1:8000`)
-- FastAPI serves domain APIs, uploads, auth, poem, and monitor data.
+- FastAPI serves domain APIs, uploads, auth, poem, monitor data, and audit/user-admin endpoints.
 - Authentication:
-  - In `DEV_MODE=1`, API auth middleware is bypassed.
+  - In `DEV_MODE=1`, APIs run with admin dev context.
   - In non-dev mode, `/api/*` requires a valid `session_token` cookie except auth whitelist routes.
+  - User roles are persisted in DB table `users`; legacy `backend/data/auth.json` is auto-migrated to `xiaoyao/admin`.
 - Data flow:
   - Persistent data stored in SQLite under `backend/data`.
   - Uploaded images stored under `backend/data/uploads`.
-  - Auth credential and secret files stored under `backend/data`.
+- Auth secret file is stored under `backend/data/.secret`; legacy `auth.json` is kept only for compatibility.
 
 ## 7. Directory Structure
 ```text
@@ -274,8 +283,19 @@ Backend monitor endpoints:
 Frontend monitor app (`frontend-monitor`) polls these endpoints and renders dashboards/charts.
 
 ## 18. Usage Notes
-- First-time auth setup requires `POST /api/auth/setup` before login is possible.
+- First-time auth setup requires `POST /api/auth/setup`; it initializes `xiaoyao` as the admin account.
 - Frontend axios interceptors redirect `401` responses to `/login`.
+- Admin APIs:
+  - `GET/POST /api/admin/users`
+  - `POST /api/admin/users/{id}/toggle-active`
+  - `POST /api/admin/users/{id}/reset-password`
+- Monitor APIs:
+  - `GET /api/monitor/realtime`, `GET /api/monitor/history` (admin-only)
+  - `GET/POST /api/monitor/sites`, `PUT/DELETE /api/monitor/sites/{id}`
+  - `GET /api/monitor/sites/{id}/results`
+- Audit APIs:
+  - `POST /api/audit/track`
+  - `GET /api/audit/logs` (admin-only)
 - Notes module and trading research panels upload images through `/api/upload`.
 - Knowledge item API fields:
   - `POST/PUT /api/knowledge-items`: optional `related_note_ids: number[]` for linked doc notes (`note_type=doc` only).

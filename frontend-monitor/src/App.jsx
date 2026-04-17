@@ -1,270 +1,461 @@
-import { useState, useEffect, useRef } from 'react';
-import { Card, Progress, Table, Tag, Tooltip } from 'antd';
+﻿import { useEffect, useMemo, useState } from 'react';
+import { Button, Card, Input, message, Modal, Popconfirm, Space, Table, Tag } from 'antd';
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip as RTooltip, ResponsiveContainer, Legend,
-} from 'recharts';
-import { fetchRealtime, fetchHistory } from './api';
+  ArrowLeftOutlined,
+  DesktopOutlined,
+  FileSearchOutlined,
+  GlobalOutlined,
+  LogoutOutlined,
+  TeamOutlined,
+} from '@ant-design/icons';
+import { authApi, monitorApi, userAdminApi, auditApi } from './api';
 
 const POLL_MS = 3000;
 
-function formatUptime(s) {
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const parts = [];
-  if (d) parts.push(`${d}天`);
-  if (h) parts.push(`${h}时`);
-  parts.push(`${m}分`);
-  return parts.join(' ');
+function useAdminGuard() {
+  const [ready, setReady] = useState(false);
+  const [ok, setOk] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    authApi
+      .check()
+      .then((res) => {
+        if (!mounted) return;
+        const data = res.data || {};
+        if (!data.authenticated || !data.is_admin) {
+          window.location.href = '/';
+          return;
+        }
+        setOk(true);
+        setReady(true);
+      })
+      .catch(() => {
+        window.location.href = '/login';
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return { ready, ok };
 }
 
-function GaugeCard({ title, percent, sub, color }) {
+function ServerPanel() {
+  const [data, setData] = useState(null);
+  const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    let timer = null;
+    let mounted = true;
+    monitorApi
+      .history()
+      .then((res) => {
+        if (mounted) setHistory(Array.isArray(res.data) ? res.data : []);
+      })
+      .catch(() => {});
+
+    const poll = () => {
+      monitorApi
+        .realtime()
+        .then((res) => {
+          if (!mounted) return;
+          const next = res.data || {};
+          setData(next);
+          setHistory((prev) => {
+            const row = {
+              ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+              cpu: next?.cpu?.percent || 0,
+              mem: next?.memory?.percent || 0,
+            };
+            const out = [...prev, row];
+            return out.length > 180 ? out.slice(-180) : out;
+          });
+        })
+        .catch(() => {});
+    };
+
+    poll();
+    timer = setInterval(poll, POLL_MS);
+    return () => {
+      mounted = false;
+      if (timer) clearInterval(timer);
+    };
+  }, []);
+
+  if (!data) return <Card>加载服务器监控中...</Card>;
   return (
-    <Card className="gauge-card" size="small">
-      <div className="gauge-title">{title}</div>
-      <Progress
-        type="dashboard"
-        percent={percent}
-        strokeColor={percent > 90 ? '#ff4d4f' : percent > 70 ? '#faad14' : (color || '#1890ff')}
-        format={(p) => <span className="gauge-value">{p}%</span>}
-        size={120}
+    <Space direction="vertical" style={{ width: '100%' }} size={12}>
+      <Card title="系统状态">
+        <div>主机: {data.system?.hostname || '-'}</div>
+        <div>系统: {data.system?.os || '-'}</div>
+        <div>CPU: {data.cpu?.percent || 0}%</div>
+        <div>内存: {data.memory?.percent || 0}%</div>
+      </Card>
+      <Card title="最近采样">
+        <Table
+          rowKey={(row) => `${row.ts}-${row.cpu}-${row.mem}`}
+          dataSource={[...history].reverse().slice(0, 20)}
+          size="small"
+          pagination={false}
+          columns={[
+            { title: '时间', dataIndex: 'ts', key: 'ts' },
+            { title: 'CPU%', dataIndex: 'cpu', key: 'cpu' },
+            { title: '内存%', dataIndex: 'mem', key: 'mem' },
+          ]}
+        />
+      </Card>
+    </Space>
+  );
+}
+
+function SitePanel() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ name: '', url: '', enabled: true, interval_sec: 60, timeout_sec: 8 });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await monitorApi.listSites();
+      setRows(Array.isArray(res.data) ? res.data : []);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const submit = async () => {
+    if (!form.name.trim() || !form.url.trim()) {
+      message.warning('请填写名称和 URL');
+      return;
+    }
+    if (editing) await monitorApi.updateSite(editing.id, form);
+    else await monitorApi.createSite(form);
+    setEditing(null);
+    setForm({ name: '', url: '', enabled: true, interval_sec: 60, timeout_sec: 8 });
+    await load();
+  };
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={12}>
+      <Card title={editing ? '编辑站点' : '新增站点'}>
+        <Space wrap>
+          <Input
+            placeholder="名称"
+            value={form.name}
+            onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))}
+            style={{ width: 160 }}
+          />
+          <Input
+            placeholder="URL (http/https)"
+            value={form.url}
+            onChange={(e) => setForm((s) => ({ ...s, url: e.target.value }))}
+            style={{ width: 320 }}
+          />
+          <Input
+            type="number"
+            placeholder="间隔秒"
+            value={form.interval_sec}
+            onChange={(e) => setForm((s) => ({ ...s, interval_sec: Number(e.target.value || 60) }))}
+            style={{ width: 110 }}
+          />
+          <Input
+            type="number"
+            placeholder="超时秒"
+            value={form.timeout_sec}
+            onChange={(e) => setForm((s) => ({ ...s, timeout_sec: Number(e.target.value || 8) }))}
+            style={{ width: 110 }}
+          />
+          <Button type="primary" onClick={submit}>
+            {editing ? '保存' : '创建'}
+          </Button>
+          {editing && (
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setForm({ name: '', url: '', enabled: true, interval_sec: 60, timeout_sec: 8 });
+              }}
+            >
+              取消
+            </Button>
+          )}
+        </Space>
+      </Card>
+      <Card title="巡检目标">
+        <Table
+          rowKey="id"
+          loading={loading}
+          dataSource={rows}
+          size="small"
+          pagination={false}
+          columns={[
+            { title: '名称', dataIndex: 'name', key: 'name' },
+            { title: 'URL', dataIndex: 'url', key: 'url' },
+            {
+              title: '状态',
+              key: 'status',
+              render: (_, r) => (
+                <Tag color={r.last_ok ? 'green' : r.last_ok === false ? 'red' : 'default'}>
+                  {r.last_ok ? '正常' : r.last_ok === false ? '异常' : '未检'}
+                </Tag>
+              ),
+            },
+            { title: '状态码', dataIndex: 'last_status_code', key: 'last_status_code' },
+            { title: '耗时ms', dataIndex: 'last_response_ms', key: 'last_response_ms' },
+            {
+              title: '操作',
+              key: 'op',
+              render: (_, r) => (
+                <Space>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setEditing(r);
+                      setForm({
+                        name: r.name,
+                        url: r.url,
+                        enabled: r.enabled,
+                        interval_sec: r.interval_sec,
+                        timeout_sec: r.timeout_sec,
+                      });
+                    }}
+                  >
+                    编辑
+                  </Button>
+                  <Popconfirm
+                    title="确认删除该站点？"
+                    onConfirm={async () => {
+                      await monitorApi.deleteSite(r.id);
+                      await load();
+                    }}
+                  >
+                    <Button size="small" danger>
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Card>
+    </Space>
+  );
+}
+
+function UserPanel() {
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState({ username: '', password: '' });
+  const [pwdModal, setPwdModal] = useState({ open: false, userId: null, password: '' });
+
+  const load = async () => {
+    const res = await userAdminApi.list();
+    setRows(Array.isArray(res.data) ? res.data : []);
+  };
+  useEffect(() => {
+    load();
+  }, []);
+
+  const createUser = async () => {
+    if (!form.username.trim() || !form.password.trim()) return;
+    await userAdminApi.create(form);
+    setForm({ username: '', password: '' });
+    await load();
+  };
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={12}>
+      <Card title="新增用户">
+        <Space>
+          <Input
+            placeholder="用户名"
+            value={form.username}
+            onChange={(e) => setForm((s) => ({ ...s, username: e.target.value }))}
+          />
+          <Input.Password
+            placeholder="密码"
+            value={form.password}
+            onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))}
+          />
+          <Button type="primary" onClick={createUser}>
+            创建
+          </Button>
+        </Space>
+      </Card>
+      <Card title="用户列表">
+        <Table
+          rowKey="id"
+          dataSource={rows}
+          size="small"
+          pagination={false}
+          columns={[
+            { title: '用户名', dataIndex: 'username', key: 'username' },
+            { title: '角色', dataIndex: 'role', key: 'role' },
+            {
+              title: '状态',
+              key: 'status',
+              render: (_, r) => <Tag color={r.is_active ? 'green' : 'red'}>{r.is_active ? '启用' : '停用'}</Tag>,
+            },
+            {
+              title: '操作',
+              key: 'op',
+              render: (_, r) => (
+                <Space>
+                  <Button
+                    size="small"
+                    disabled={r.username === 'xiaoyao'}
+                    onClick={async () => {
+                      await userAdminApi.toggleActive(r.id);
+                      await load();
+                    }}
+                  >
+                    {r.is_active ? '停用' : '启用'}
+                  </Button>
+                  <Button size="small" onClick={() => setPwdModal({ open: true, userId: r.id, password: '' })}>
+                    重置密码
+                  </Button>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Card>
+      <Modal
+        title="重置密码"
+        open={pwdModal.open}
+        onCancel={() => setPwdModal({ open: false, userId: null, password: '' })}
+        onOk={async () => {
+          if (!pwdModal.userId || !pwdModal.password.trim()) return;
+          await userAdminApi.resetPassword(pwdModal.userId, { password: pwdModal.password });
+          setPwdModal({ open: false, userId: null, password: '' });
+          await load();
+        }}
+      >
+        <Input.Password
+          placeholder="新密码"
+          value={pwdModal.password}
+          onChange={(e) => setPwdModal((s) => ({ ...s, password: e.target.value }))}
+        />
+      </Modal>
+    </Space>
+  );
+}
+
+function AuditPanel() {
+  const [rows, setRows] = useState([]);
+
+  const load = async () => {
+    const res = await auditApi.list({ page: 1, size: 100 });
+    setRows(Array.isArray(res.data) ? res.data : []);
+  };
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <Card title="浏览与操作记录">
+      <Table
+        rowKey="id"
+        dataSource={rows}
+        size="small"
+        pagination={false}
+        columns={[
+          {
+            title: '时间',
+            dataIndex: 'created_at',
+            key: 'created_at',
+            render: (v) => (v ? String(v).replace('T', ' ').slice(0, 19) : '-'),
+          },
+          { title: '用户', dataIndex: 'username', key: 'username' },
+          { title: '角色', dataIndex: 'role', key: 'role' },
+          { title: '类型', dataIndex: 'event_type', key: 'event_type' },
+          { title: '路径', dataIndex: 'path', key: 'path', ellipsis: true },
+          { title: '模块', dataIndex: 'module', key: 'module' },
+          { title: '详情', dataIndex: 'detail', key: 'detail', ellipsis: true },
+        ]}
       />
-      {sub && <div className="gauge-sub">{sub}</div>}
     </Card>
   );
 }
 
-function ServiceDot({ name, running }) {
-  return (
-    <div className="svc-item">
-      <span className={`svc-dot ${running ? 'on' : 'off'}`} />
-      <span className="svc-name">{name}</span>
-      <Tag color={running ? 'green' : 'red'}>{running ? '运行中' : '未运行'}</Tag>
-    </div>
-  );
-}
-
-const procColumns = [
-  { title: 'PID', dataIndex: 'pid', key: 'pid', width: 80 },
-  { title: '进程名', dataIndex: 'name', key: 'name', ellipsis: true },
-  { title: '用户', dataIndex: 'user', key: 'user', width: 100, ellipsis: true },
-  {
-    title: 'CPU%', dataIndex: 'cpu', key: 'cpu', width: 80, sorter: (a, b) => a.cpu - b.cpu,
-    render: v => <span style={{ color: v > 50 ? '#ff4d4f' : v > 20 ? '#faad14' : '#52c41a' }}>{v}</span>,
-  },
-  {
-    title: '内存%', dataIndex: 'mem', key: 'mem', width: 80, sorter: (a, b) => a.mem - b.mem,
-    render: v => <span style={{ color: v > 50 ? '#ff4d4f' : v > 20 ? '#faad14' : '#52c41a' }}>{v}</span>,
-  },
-];
-
 export default function App() {
-  const [data, setData] = useState(null);
-  const [history, setHistory] = useState([]);
-  const timerRef = useRef(null);
+  const { ready, ok } = useAdminGuard();
+  const moduleItems = useMemo(
+    () => [
+      { key: 'server', label: '服务器监控', icon: <DesktopOutlined />, desc: '查看主机实时状态与采样', content: <ServerPanel /> },
+      { key: 'site', label: '站点可用性巡检', icon: <GlobalOutlined />, desc: '管理巡检目标与健康状态', content: <SitePanel /> },
+      { key: 'users', label: '用户管理', icon: <TeamOutlined />, desc: '创建账户、启停用与重置密码', content: <UserPanel /> },
+      { key: 'audit', label: '浏览记录', icon: <FileSearchOutlined />, desc: '查看页面访问与关键操作审计', content: <AuditPanel /> },
+    ],
+    [],
+  );
+  const [activeKey, setActiveKey] = useState('server');
 
   useEffect(() => {
-    fetchHistory().then(r => setHistory(r.data)).catch(() => {});
-    const poll = () => {
-      fetchRealtime().then(r => {
-        setData(r.data);
-        setHistory(prev => {
-          const next = [...prev, {
-            ts: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-            cpu: r.data.cpu.percent,
-            mem: r.data.memory.percent,
-            net_down: r.data.network.speed_down,
-            net_up: r.data.network.speed_up,
-          }];
-          return next.length > 720 ? next.slice(-720) : next;
-        });
-      }).catch(() => {});
-    };
-    poll();
-    timerRef.current = setInterval(poll, POLL_MS);
-    return () => clearInterval(timerRef.current);
-  }, []);
+    if (!ok) return;
+    auditApi.track({ path: '/monitor/', module: 'monitor_home', detail: 'open monitor app' }).catch(() => {});
+  }, [ok]);
 
-  if (!data) {
-    return <div className="loading">正在连接服务器...</div>;
-  }
+  if (!ready) return <div className="loading">正在验证管理员权限...</div>;
 
-  const { system, cpu, memory, disk, network, processes, services } = data;
+  const activeModule = moduleItems.find((m) => m.key === activeKey) || moduleItems[0];
 
   return (
-    <div className="monitor-app">
-      <header className="monitor-header">
-        <div className="header-left">
-          <a href="/" className="back-link">← 返回工作台</a>
-          <h1>服务器监控</h1>
-        </div>
-        <div className="header-right">
-          <span className="live-dot" />
-          <span>实时监控中</span>
-        </div>
-      </header>
-
-      <section className="sys-info-bar">
-        <div className="sys-tag">🖥 {system.hostname}</div>
-        <div className="sys-tag">📦 {system.os}</div>
-        <div className="sys-tag">🧬 {system.kernel}</div>
-        <div className="sys-tag">⏱ 运行 {formatUptime(system.uptime_seconds)}</div>
-        <div className="sys-tag">🕐 {system.time}</div>
-      </section>
-
-      <section className="gauge-row">
-        <GaugeCard
-          title="CPU 使用率"
-          percent={cpu.percent}
-          sub={`${cpu.cores_physical}核${cpu.cores_logical}线程 · 负载 ${cpu.load_1}/${cpu.load_5}/${cpu.load_15}`}
-        />
-        <GaugeCard
-          title="内存使用率"
-          percent={memory.percent}
-          color="#722ed1"
-          sub={`${memory.used_fmt} / ${memory.total_fmt}`}
-        />
-        <Card className="gauge-card" size="small">
-          <div className="gauge-title">磁盘</div>
-          <div className="disk-list">
-            {disk.partitions.map(p => (
-              <div key={p.mountpoint} className="disk-item">
-                <div className="disk-label">
-                  <span>{p.mountpoint}</span>
-                  <span>{p.used_fmt} / {p.total_fmt}</span>
-                </div>
-                <Progress
-                  percent={p.percent}
-                  strokeColor={p.percent > 90 ? '#ff4d4f' : p.percent > 70 ? '#faad14' : '#52c41a'}
-                  size="small"
-                />
-              </div>
-            ))}
-          </div>
-          <div className="disk-io">IO: 读 {disk.io_read_speed} MB/s · 写 {disk.io_write_speed} MB/s</div>
-        </Card>
-        <Card className="gauge-card" size="small">
-          <div className="gauge-title">网络</div>
-          <div className="net-speeds">
-            <div className="net-item">
-              <span className="net-arrow up">↑</span>
-              <span className="net-val">{network.speed_up_fmt}</span>
-            </div>
-            <div className="net-item">
-              <span className="net-arrow down">↓</span>
-              <span className="net-val">{network.speed_down_fmt}</span>
-            </div>
-          </div>
-          <div className="net-total">
-            累计 ↑ {network.bytes_sent_fmt} · ↓ {network.bytes_recv_fmt}
-          </div>
-        </Card>
-      </section>
-
-      {cpu.per_cpu && cpu.per_cpu.length > 1 && (
-        <section className="per-cpu-section">
-          <Card size="small" title="各核心 CPU 使用率">
-            <div className="per-cpu-grid">
-              {cpu.per_cpu.map((pct, i) => (
-                <Tooltip key={i} title={`核心 ${i}: ${pct}%`}>
-                  <div className="per-cpu-item">
-                    <Progress
-                      percent={pct}
-                      size="small"
-                      strokeColor={pct > 90 ? '#ff4d4f' : pct > 70 ? '#faad14' : '#1890ff'}
-                      format={() => `C${i}`}
-                    />
-                  </div>
-                </Tooltip>
-              ))}
-            </div>
-          </Card>
-        </section>
-      )}
-
-      <section className="chart-section">
-        <Card size="small" title="CPU / 内存趋势（最近1小时）">
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={history} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="cpuGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#1890ff" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#1890ff" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="memGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#722ed1" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#722ed1" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="ts" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
-              <RTooltip />
-              <Legend />
-              <Area type="monotone" dataKey="cpu" name="CPU%" stroke="#1890ff" fill="url(#cpuGrad)" />
-              <Area type="monotone" dataKey="mem" name="内存%" stroke="#722ed1" fill="url(#memGrad)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </Card>
-      </section>
-
-      <section className="chart-section">
-        <Card size="small" title="网络速率趋势 (KB/s)">
-          <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={history} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="ts" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-              <YAxis tick={{ fontSize: 11 }} unit=" KB/s" />
-              <RTooltip />
-              <Legend />
-              <Area type="monotone" dataKey="net_down" name="下行" stroke="#52c41a" fill="#52c41a" fillOpacity={0.15} />
-              <Area type="monotone" dataKey="net_up" name="上行" stroke="#faad14" fill="#faad14" fillOpacity={0.15} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </Card>
-      </section>
-
-      <section className="bottom-row">
-        <Card size="small" title="Top 10 进程" className="proc-card">
-          <Table
-            dataSource={processes}
-            columns={procColumns}
-            rowKey="pid"
-            size="small"
-            pagination={false}
-            scroll={{ y: 320 }}
-          />
-        </Card>
-
-        <Card size="small" title="服务状态" className="svc-card">
-          {Object.entries(services).map(([name, running]) => (
-            <ServiceDot key={name} name={name} running={running} />
+    <div className="monitor-layout">
+      <aside className="icon-sidebar monitor-icon-sidebar">
+        <a href="/" className="icon-sidebar-back" title="返回首页">
+          <ArrowLeftOutlined />
+        </a>
+        <div className="icon-sidebar-tabs">
+          {moduleItems.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`icon-tab ${activeKey === item.key ? 'active' : ''}`}
+              onClick={() => setActiveKey(item.key)}
+              title={item.label}
+            >
+              <span className="icon-tab-icon">{item.icon}</span>
+              <span className="icon-tab-label">{item.label.replace('监控', '')}</span>
+            </button>
           ))}
-          {cpu.temps && Object.keys(cpu.temps).length > 0 && (
-            <div className="temp-section">
-              <div className="gauge-title" style={{ marginTop: 16 }}>温度传感器</div>
-              {Object.entries(cpu.temps).map(([label, temp]) => (
-                <div key={label} className="temp-item">
-                  <span>{label}</span>
-                  <Tag color={temp > 80 ? 'red' : temp > 60 ? 'orange' : 'green'}>{temp}°C</Tag>
-                </div>
-              ))}
-            </div>
-          )}
-          {memory.swap_total > 0 && (
-            <div className="swap-section">
-              <div className="gauge-title" style={{ marginTop: 16 }}>Swap</div>
-              <Progress
-                percent={memory.swap_percent}
-                size="small"
-                strokeColor={memory.swap_percent > 80 ? '#ff4d4f' : '#1890ff'}
-              />
-              <div className="gauge-sub">{memory.swap_used_fmt} / {memory.swap_total_fmt}</div>
-            </div>
-          )}
-        </Card>
-      </section>
+        </div>
+        <div className="icon-sidebar-bottom">
+          <button
+            type="button"
+            className="icon-tab"
+            onClick={async () => {
+              await authApi.logout();
+              window.location.href = '/login';
+            }}
+            title="退出登录"
+          >
+            <span className="icon-tab-icon">
+              <LogoutOutlined />
+            </span>
+            <span className="icon-tab-label">退出</span>
+          </button>
+        </div>
+      </aside>
+
+      <div className="view-container monitor-view-container">
+        <main className="main-content">
+          <div className="monitor-main-panel">
+            <header className="monitor-main-header">
+              <div>
+                <h1>{activeModule.label}</h1>
+                <p>{activeModule.desc}</p>
+              </div>
+            </header>
+            <div className="monitor-main-body">{activeModule.content}</div>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

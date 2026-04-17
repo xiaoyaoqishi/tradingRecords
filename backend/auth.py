@@ -36,11 +36,23 @@ def _verify(stored, password):
     return hashlib.sha256((salt + password).encode()).hexdigest() == h
 
 
+def hash_password(password: str) -> str:
+    return _hash(password)
+
+
+def verify_password(stored: str, password: str) -> bool:
+    return _verify(stored, password)
+
+
 def load_credentials():
     if os.path.exists(AUTH_FILE):
         with open(AUTH_FILE) as f:
             return json.load(f)
     return None
+
+
+def load_legacy_credentials():
+    return load_credentials()
 
 
 def save_credentials(username, password):

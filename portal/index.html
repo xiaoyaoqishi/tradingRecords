@@ -153,7 +153,7 @@
       max-width: 100%;
       min-height: clamp(280px, 52vh, 520px);
     }
-    .poem-refresh-btn {
+    .poem-action-btn {
       width: 28px;
       height: 28px;
       border-radius: 50%;
@@ -168,7 +168,7 @@
       justify-content: center;
       transition: all 0.25s;
     }
-    .poem-refresh-btn:hover {
+    .poem-action-btn:hover {
       color: #5f5548;
       border-color: rgba(126, 114, 97, 0.5);
       background: rgba(245, 240, 232, 0.3);
@@ -214,22 +214,11 @@
       align-self: flex-end;
       opacity: 0.96;
     }
-    .poem-toggle {
-      margin-top: 14px;
-      border: 1px solid rgba(126, 114, 97, 0.3);
-      background: transparent;
-      color: #6a6258;
-      border-radius: 2px;
-      padding: 5px 16px;
-      cursor: pointer;
-      font-size: 13px;
-      font-family: inherit;
-      letter-spacing: 0.1rem;
-      transition: all 0.25s;
-    }
-    .poem-toggle:hover {
-      background: rgba(245, 240, 232, 0.3);
-      border-color: rgba(126, 114, 97, 0.5);
+    .poem-toggle.expanded {
+      color: #5f5548;
+      border-color: rgba(126, 114, 97, 0.55);
+      background: rgba(245, 240, 232, 0.32);
+      transform: rotate(180deg);
     }
 
     /* ── 导航区：印章 + 墨线 ── */
@@ -424,12 +413,12 @@
       <div class="poem-vertical-wrap">
         <div class="poem-head">
           <div class="title">每日一诗</div>
-          <button class="poem-refresh-btn" id="poemRefreshBtn" title="换一首">↻</button>
+          <button class="poem-action-btn poem-refresh-btn" id="poemRefreshBtn" title="换一首">↻</button>
+          <button class="poem-action-btn poem-toggle" id="poemToggle" title="展开全文" style="display:none;">↕</button>
         </div>
         <div class="line" id="poemLine"></div>
         <div class="meta" id="poemMeta"></div>
       </div>
-      <button class="poem-toggle" id="poemToggle" style="display:none;">展开全文</button>
     </div>
   </div>
 
@@ -446,9 +435,9 @@
       <div class="desc">日记文档 · 待办管理 · 回收站</div>
     </a>
     <div class="nav-separator"></div>
-    <a class="nav-item" href="/monitor/">
+    <a class="nav-item" href="/monitor/" id="monitorNavItem">
       <div class="seal">监</div>
-      <div class="name">服务器监控</div>
+      <div class="name">网站监控</div>
       <div class="desc">CPU 内存 磁盘 网络 · 实时监控</div>
     </a>
   </div>
@@ -487,6 +476,17 @@
         location.href = '/login';
         return;
       }
+      if (!data.is_admin) {
+        const monitorNav = document.getElementById('monitorNavItem');
+        if (monitorNav) {
+          monitorNav.style.display = 'none';
+        }
+      }
+      fetch('/api/audit/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: '/', module: 'portal', detail: 'portal home' }),
+      }).catch(() => {});
     } catch {}
   })();
 
@@ -528,18 +528,21 @@
     const isLong = poemLine.textContent.length > 70 || poemLine.textContent.split('\n').length > 3;
     poemLine.classList.remove('expanded');
     poemLine.classList.toggle('collapsed', isLong);
-    poemToggle.style.display = isLong ? 'inline-block' : 'none';
-    poemToggle.textContent = '展开全文';
+    poemToggle.classList.remove('expanded');
+    poemToggle.style.display = isLong ? 'inline-flex' : 'none';
+    poemToggle.title = '展开全文';
     poemToggle.onclick = () => {
       const opened = !poemLine.classList.contains('collapsed');
       if (opened) {
         poemLine.classList.remove('expanded');
         poemLine.classList.add('collapsed');
-        poemToggle.textContent = '展开全文';
+        poemToggle.classList.remove('expanded');
+        poemToggle.title = '展开全文';
       } else {
         poemLine.classList.remove('collapsed');
         poemLine.classList.add('expanded');
-        poemToggle.textContent = '收起';
+        poemToggle.classList.add('expanded');
+        poemToggle.title = '收起全文';
       }
     };
   }

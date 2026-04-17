@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func, or_
+from sqlalchemy import text, func, or_, event
+from sqlalchemy.orm import with_loader_criteria
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 import json
@@ -17,6 +18,7 @@ import html
 import hashlib
 import xml.etree.ElementTree as ET
 import random
+import contextvars
 from pathlib import Path
 from datetime import datetime, date, timedelta
 from email.utils import parsedate_to_datetime
@@ -35,7 +37,7 @@ from database import engine, get_db, Base, SessionLocal
 from models import (
     Trade, TradeReview, TradeSourceMetadata, Review, ReviewTradeLink, ReviewSession, ReviewSessionTradeLink,
     TradePlan, TradePlanTradeLink, TradePlanReviewSessionLink, KnowledgeItem,
-    Notebook, Note, NoteLink, TodoItem, TradeBroker,
+    Notebook, Note, NoteLink, TodoItem, TradeBroker, User, BrowseLog, MonitorSite, MonitorSiteResult,
 )
 from schemas import (
     TradeCreate, TradeUpdate, TradeResponse,
@@ -52,7 +54,16 @@ from schemas import (
     NoteCreate, NoteUpdate, NoteResponse,
     TodoCreate, TodoUpdate, TodoResponse,
 )
-from auth import load_credentials, save_credentials, check_login, create_token, verify_token
+from auth import (
+    load_credentials,
+    save_credentials,
+    check_login,
+    create_token,
+    verify_token,
+    load_legacy_credentials,
+    hash_password,
+    verify_password,
+)
 from trade_review_taxonomy import trade_review_taxonomy
 from trading.source_service import (
     extract_source_from_notes as _source_extract_source_from_notes,
@@ -97,6 +108,68 @@ from trading.tag_service import (
 
 Base.metadata.create_all(bind=engine)
 
+CURRENT_USERNAME: contextvars.ContextVar[str] = contextvars.ContextVar("current_username", default="xiaoyao")
+CURRENT_ROLE: contextvars.ContextVar[str] = contextvars.ContextVar("current_role", default="admin")
+CURRENT_IS_ADMIN: contextvars.ContextVar[bool] = contextvars.ContextVar("current_is_admin", default=True)
+
+ROLE_SCOPED_MODELS = (
+    Trade,
+    ReviewSession,
+    TradePlan,
+    KnowledgeItem,
+    Notebook,
+    Note,
+    TodoItem,
+    TradeBroker,
+)
+
+
+def _current_username() -> str:
+    return CURRENT_USERNAME.get() or "xiaoyao"
+
+
+def _current_role() -> str:
+    role = (CURRENT_ROLE.get() or "admin").strip().lower()
+    return role if role in {"admin", "user"} else "user"
+
+
+def _current_is_admin() -> bool:
+    return bool(CURRENT_IS_ADMIN.get()) or _current_role() == "admin"
+
+
+def _owner_role_value_for_create() -> str:
+    return "admin" if _current_is_admin() else "user"
+
+
+def _require_admin():
+    if not _current_is_admin():
+        raise HTTPException(403, "无权限")
+
+
+def _owner_role_filter_for_admin(model, owner_role: Optional[str]):
+    if not _current_is_admin():
+        return None
+    role = (owner_role or "").strip().lower()
+    if role not in {"", "admin", "user"}:
+        raise HTTPException(400, "owner_role must be admin or user")
+    if role:
+        return model.owner_role == role
+    return None
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _apply_owner_role_scope(execute_state):
+    if not execute_state.is_select:
+        return
+    if _current_is_admin():
+        return
+    statement = execute_state.statement
+    for model in ROLE_SCOPED_MODELS:
+        statement = statement.options(
+            with_loader_criteria(model, lambda cls: cls.owner_role == "user", include_aliases=True)
+        )
+    execute_state.statement = statement
+
 
 def _column_names(db: Session, table: str) -> set[str]:
     rows = db.execute(text(f"PRAGMA table_info({table})")).fetchall()
@@ -125,11 +198,13 @@ def _migrate_legacy_schema():
             db.execute(text("ALTER TABLE notebooks ADD COLUMN parent_id INTEGER"))
         if "sort_order" not in notebook_cols:
             db.execute(text("ALTER TABLE notebooks ADD COLUMN sort_order INTEGER DEFAULT 0"))
+        _ensure_sqlite_column(db, "notebooks", "owner_role", "VARCHAR(20) DEFAULT 'admin'")
         note_cols = _column_names(db, "notes")
         if "is_deleted" not in note_cols:
             db.execute(text("ALTER TABLE notes ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
         if "deleted_at" not in note_cols:
             db.execute(text("ALTER TABLE notes ADD COLUMN deleted_at DATETIME"))
+        _ensure_sqlite_column(db, "notes", "owner_role", "VARCHAR(20) DEFAULT 'admin'")
         todo_cols = _column_names(db, "todo_items")
         if "source_anchor_text" not in todo_cols:
             db.execute(text("ALTER TABLE todo_items ADD COLUMN source_anchor_text TEXT"))
@@ -137,6 +212,7 @@ def _migrate_legacy_schema():
             db.execute(text("ALTER TABLE todo_items ADD COLUMN due_at DATETIME"))
         if "reminder_at" not in todo_cols:
             db.execute(text("ALTER TABLE todo_items ADD COLUMN reminder_at DATETIME"))
+        _ensure_sqlite_column(db, "todo_items", "owner_role", "VARCHAR(20) DEFAULT 'admin'")
         review_cols = _column_names(db, "reviews")
         if "title" not in review_cols:
             db.execute(text("ALTER TABLE reviews ADD COLUMN title VARCHAR(200)"))
@@ -165,12 +241,15 @@ def _migrate_legacy_schema():
             db.execute(text("ALTER TABLE trades ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
         if "deleted_at" not in trade_cols:
             db.execute(text("ALTER TABLE trades ADD COLUMN deleted_at DATETIME"))
+        _ensure_sqlite_column(db, "trades", "owner_role", "VARCHAR(20) DEFAULT 'admin'")
         if _table_exists(db, "trade_brokers"):
             _ensure_sqlite_column(db, "trade_brokers", "is_deleted", "BOOLEAN DEFAULT 0")
             _ensure_sqlite_column(db, "trade_brokers", "deleted_at", "DATETIME")
+            _ensure_sqlite_column(db, "trade_brokers", "owner_role", "VARCHAR(20) DEFAULT 'admin'")
         if _table_exists(db, "knowledge_items"):
             _ensure_sqlite_column(db, "knowledge_items", "is_deleted", "BOOLEAN DEFAULT 0")
             _ensure_sqlite_column(db, "knowledge_items", "deleted_at", "DATETIME")
+            _ensure_sqlite_column(db, "knowledge_items", "owner_role", "VARCHAR(20) DEFAULT 'admin'")
         if _table_exists(db, "review_sessions"):
             _ensure_sqlite_column(db, "review_sessions", "review_kind", "VARCHAR(40) DEFAULT 'custom'")
             _ensure_sqlite_column(db, "review_sessions", "review_scope", "VARCHAR(40) DEFAULT 'custom'")
@@ -190,6 +269,7 @@ def _migrate_legacy_schema():
             _ensure_sqlite_column(db, "review_sessions", "star_rating", "INTEGER")
             _ensure_sqlite_column(db, "review_sessions", "is_deleted", "BOOLEAN DEFAULT 0")
             _ensure_sqlite_column(db, "review_sessions", "deleted_at", "DATETIME")
+            _ensure_sqlite_column(db, "review_sessions", "owner_role", "VARCHAR(20) DEFAULT 'admin'")
         if _table_exists(db, "trade_plans"):
             _ensure_sqlite_column(db, "trade_plans", "status", "VARCHAR(20) DEFAULT 'draft'")
             _ensure_sqlite_column(db, "trade_plans", "symbol", "VARCHAR(50)")
@@ -211,6 +291,19 @@ def _migrate_legacy_schema():
             _ensure_sqlite_column(db, "trade_plans", "research_notes", "TEXT")
             _ensure_sqlite_column(db, "trade_plans", "is_deleted", "BOOLEAN DEFAULT 0")
             _ensure_sqlite_column(db, "trade_plans", "deleted_at", "DATETIME")
+            _ensure_sqlite_column(db, "trade_plans", "owner_role", "VARCHAR(20) DEFAULT 'admin'")
+        for table in (
+            "trades",
+            "review_sessions",
+            "trade_plans",
+            "knowledge_items",
+            "trade_brokers",
+            "notebooks",
+            "notes",
+            "todo_items",
+        ):
+            if _table_exists(db, table):
+                db.execute(text(f"UPDATE {table} SET owner_role='admin' WHERE owner_role IS NULL OR owner_role=''"))
         db.commit()
     finally:
         db.close()
@@ -284,8 +377,8 @@ def _init_default_notebooks():
     try:
         if db.query(Notebook).count() == 0:
             db.add_all([
-                Notebook(name="日记本", icon="📔", sort_order=0),
-                Notebook(name="文档", icon="📄", sort_order=1),
+                Notebook(name="日记本", icon="📔", sort_order=0, owner_role="admin"),
+                Notebook(name="文档", icon="📄", sort_order=1, owner_role="admin"),
             ])
             db.commit()
     finally:
@@ -293,6 +386,35 @@ def _init_default_notebooks():
 
 
 _init_default_notebooks()
+
+
+def _migrate_legacy_auth_to_users():
+    db = SessionLocal()
+    try:
+        has_users = db.query(User).first() is not None
+        if has_users:
+            return
+        legacy = load_legacy_credentials() or {}
+        legacy_hash = str(legacy.get("password") or "").strip()
+        if legacy_hash and ":" in legacy_hash:
+            password_hash = legacy_hash
+        else:
+            # no legacy credential: keep setup flow available
+            return
+        db.add(
+            User(
+                username="xiaoyao",
+                password_hash=password_hash,
+                role="admin",
+                is_active=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+_migrate_legacy_auth_to_users()
 
 TODO_PRIORITIES = {"low", "medium", "high"}
 
@@ -318,15 +440,89 @@ AUTH_WHITELIST = {"/api/auth/login", "/api/auth/check", "/api/auth/setup"}
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "0" if DEV_MODE else "1") == "1"
 
 
+def _write_browse_log(
+    db: Session,
+    *,
+    username: str,
+    role: str,
+    event_type: str,
+    path: str,
+    module: Optional[str] = None,
+    ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    detail: Optional[str] = None,
+):
+    db.add(
+        BrowseLog(
+            username=(username or "").strip() or "unknown",
+            role=(role or "").strip() or "user",
+            event_type=(event_type or "").strip() or "action",
+            path=(path or "").strip() or "/",
+            module=(module or "").strip() or None,
+            ip=(ip or "").strip() or None,
+            user_agent=(user_agent or "").strip() or None,
+            detail=(detail or "").strip() or None,
+        )
+    )
+
+
+def _write_action_log(request: Request, *, path: str, detail: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        _write_browse_log(
+            db,
+            username=_current_username(),
+            role=_current_role(),
+            event_type="action",
+            path=path,
+            module="audit",
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            detail=detail,
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        token_username = "xiaoyao"
+        token_role = "admin"
+        token_is_admin = True
         if DEV_MODE:
-            return await call_next(request)
-        if request.url.path.startswith("/api/") and request.url.path not in AUTH_WHITELIST:
+            request.state.username = token_username
+            request.state.role = token_role
+            request.state.is_admin = token_is_admin
+        elif request.url.path.startswith("/api/"):
             token = request.cookies.get(AUTH_COOKIE)
-            if not token or not verify_token(token):
+            parsed_username = verify_token(token) if token else None
+            if request.url.path not in AUTH_WHITELIST and not parsed_username:
                 return JSONResponse(status_code=401, content={"detail": "未登录"})
-        return await call_next(request)
+            if parsed_username:
+                db = SessionLocal()
+                try:
+                    user = db.query(User).filter(User.username == parsed_username, User.is_active == True).first()  # noqa: E712
+                finally:
+                    db.close()
+                if not user and request.url.path not in AUTH_WHITELIST:
+                    return JSONResponse(status_code=401, content={"detail": "账号不可用"})
+                if user:
+                    token_username = user.username
+                    token_role = (user.role or "user").strip().lower()
+                    token_is_admin = token_role == "admin"
+            request.state.username = token_username
+            request.state.role = token_role
+            request.state.is_admin = token_is_admin
+        username_token = CURRENT_USERNAME.set(token_username)
+        role_token = CURRENT_ROLE.set(token_role)
+        is_admin_token = CURRENT_IS_ADMIN.set(token_is_admin)
+        try:
+            return await call_next(request)
+        finally:
+            CURRENT_USERNAME.reset(username_token)
+            CURRENT_ROLE.reset(role_token)
+            CURRENT_IS_ADMIN.reset(is_admin_token)
 
 
 app.add_middleware(AuthMiddleware)
@@ -337,40 +533,274 @@ class LoginBody(BaseModel):
     password: str
 
 
+class UserCreateBody(BaseModel):
+    username: str
+    password: str
+
+
+class UserResetPasswordBody(BaseModel):
+    password: str
+
+
+class BrowseTrackBody(BaseModel):
+    path: str
+    module: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class MonitorSiteCreateBody(BaseModel):
+    name: str
+    url: str
+    enabled: Optional[bool] = True
+    interval_sec: Optional[int] = 60
+    timeout_sec: Optional[int] = 8
+
+
+class MonitorSiteUpdateBody(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+    enabled: Optional[bool] = None
+    interval_sec: Optional[int] = None
+    timeout_sec: Optional[int] = None
+
+
 @app.get("/api/auth/check")
 def auth_check(request: Request):
+    if DEV_MODE:
+        return {"authenticated": True, "username": "xiaoyao", "role": "admin", "is_admin": True}
     token = request.cookies.get(AUTH_COOKIE)
-    if token and verify_token(token):
-        return {"authenticated": True, "username": verify_token(token)}
-    return {"authenticated": False}
+    parsed_username = verify_token(token) if token else None
+    if not parsed_username:
+        return {"authenticated": False}
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == parsed_username, User.is_active == True).first()  # noqa: E712
+        if not user:
+            return {"authenticated": False}
+        role = (user.role or "user").strip().lower()
+        return {"authenticated": True, "username": user.username, "role": role, "is_admin": role == "admin"}
+    finally:
+        db.close()
 
 
 @app.post("/api/auth/setup")
 def auth_setup(body: LoginBody):
-    if load_credentials():
-        raise HTTPException(400, "账号已存在，无法重复初始化")
-    save_credentials(body.username, body.password)
-    return {"ok": True}
+    db = SessionLocal()
+    try:
+        if db.query(User).first():
+            raise HTTPException(400, "账号已存在，无法重复初始化")
+        db.add(
+            User(
+                username="xiaoyao",
+                password_hash=hash_password(body.password),
+                role="admin",
+                is_active=True,
+            )
+        )
+        db.commit()
+        # keep legacy auth file in sync for compatibility with older deploy scripts
+        save_credentials("xiaoyao", body.password)
+        return {"ok": True, "username": "xiaoyao", "role": "admin"}
+    finally:
+        db.close()
 
 
 @app.post("/api/auth/login")
-def auth_login(body: LoginBody, response: Response):
-    if not load_credentials():
-        raise HTTPException(400, "请先初始化账号 (POST /api/auth/setup)")
-    if not check_login(body.username, body.password):
-        raise HTTPException(401, "用户名或密码错误")
-    token = create_token(body.username)
+def auth_login(body: LoginBody, response: Response, request: Request):
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == body.username).first()
+        if not user:
+            if db.query(User).count() == 0:
+                raise HTTPException(400, "请先初始化账号 (POST /api/auth/setup)")
+            raise HTTPException(401, "用户名或密码错误")
+        if not bool(user.is_active):
+            raise HTTPException(403, "账号已停用")
+        if not verify_password(user.password_hash, body.password):
+            raise HTTPException(401, "用户名或密码错误")
+        token = create_token(user.username)
+        _write_browse_log(
+            db,
+            username=user.username,
+            role=user.role or "user",
+            event_type="action",
+            path="/api/auth/login",
+            module="auth",
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            detail="login success",
+        )
+        db.commit()
+    finally:
+        db.close()
     response.set_cookie(
         AUTH_COOKIE, token,
         max_age=7 * 86400, httponly=True, samesite="lax", path="/", secure=COOKIE_SECURE,
     )
-    return {"ok": True, "username": body.username}
+    role = user.role if "user" in locals() and user else "user"
+    return {"ok": True, "username": body.username, "role": role, "is_admin": role == "admin"}
 
 
 @app.post("/api/auth/logout")
-def auth_logout(response: Response):
+def auth_logout(response: Response, request: Request):
+    _write_action_log(request, path="/api/auth/logout", detail="logout")
     response.delete_cookie(AUTH_COOKIE, path="/")
     return {"ok": True}
+
+
+@app.get("/api/admin/users")
+def admin_list_users(db: Session = Depends(get_db)):
+    _require_admin()
+    rows = db.query(User).order_by(User.created_at.desc(), User.id.desc()).all()
+    return [
+        {
+            "id": x.id,
+            "username": x.username,
+            "role": x.role,
+            "is_active": bool(x.is_active),
+            "created_at": x.created_at,
+            "updated_at": x.updated_at,
+        }
+        for x in rows
+    ]
+
+
+@app.post("/api/admin/users")
+def admin_create_user(body: UserCreateBody, request: Request, db: Session = Depends(get_db)):
+    _require_admin()
+    username = (body.username or "").strip()
+    password = str(body.password or "")
+    if not username:
+        raise HTTPException(400, "username 不能为空")
+    if username.lower() == "xiaoyao":
+        raise HTTPException(400, "xiaoyao 为保留管理员账号")
+    if len(password) < 4:
+        raise HTTPException(400, "password 至少 4 位")
+    existed = db.query(User).filter(User.username == username).first()
+    if existed:
+        raise HTTPException(400, "用户名已存在")
+    obj = User(username=username, password_hash=hash_password(password), role="user", is_active=True)
+    db.add(obj)
+    _write_browse_log(
+        db,
+        username=_current_username(),
+        role=_current_role(),
+        event_type="action",
+        path="/api/admin/users",
+        module="user_admin",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        detail=f"create user {username}",
+    )
+    db.commit()
+    db.refresh(obj)
+    return {"id": obj.id, "username": obj.username, "role": obj.role, "is_active": bool(obj.is_active)}
+
+
+@app.post("/api/admin/users/{user_id}/toggle-active")
+def admin_toggle_user_active(user_id: int, request: Request, db: Session = Depends(get_db)):
+    _require_admin()
+    row = db.query(User).filter(User.id == user_id).first()
+    if not row:
+        raise HTTPException(404, "user not found")
+    if row.username == "xiaoyao":
+        raise HTTPException(400, "xiaoyao 不允许停用")
+    row.is_active = not bool(row.is_active)
+    _write_browse_log(
+        db,
+        username=_current_username(),
+        role=_current_role(),
+        event_type="action",
+        path=f"/api/admin/users/{user_id}/toggle-active",
+        module="user_admin",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        detail=f"set active={row.is_active} for {row.username}",
+    )
+    db.commit()
+    return {"ok": True, "id": row.id, "is_active": bool(row.is_active)}
+
+
+@app.post("/api/admin/users/{user_id}/reset-password")
+def admin_reset_user_password(user_id: int, body: UserResetPasswordBody, request: Request, db: Session = Depends(get_db)):
+    _require_admin()
+    row = db.query(User).filter(User.id == user_id).first()
+    if not row:
+        raise HTTPException(404, "user not found")
+    if len(str(body.password or "")) < 4:
+        raise HTTPException(400, "password 至少 4 位")
+    row.password_hash = hash_password(body.password)
+    _write_browse_log(
+        db,
+        username=_current_username(),
+        role=_current_role(),
+        event_type="action",
+        path=f"/api/admin/users/{user_id}/reset-password",
+        module="user_admin",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        detail=f"reset password for {row.username}",
+    )
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/audit/track")
+def audit_track(body: BrowseTrackBody, request: Request, db: Session = Depends(get_db)):
+    _write_browse_log(
+        db,
+        username=_current_username(),
+        role=_current_role(),
+        event_type="page_view",
+        path=(body.path or "/").strip() or "/",
+        module=(body.module or "").strip() or None,
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        detail=body.detail,
+    )
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/audit/logs")
+def audit_logs(
+    username: Optional[str] = None,
+    module: Optional[str] = None,
+    event_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    _require_admin()
+    q = db.query(BrowseLog)
+    if username:
+        q = q.filter(BrowseLog.username == username)
+    if module:
+        q = q.filter(BrowseLog.module == module)
+    if event_type:
+        q = q.filter(BrowseLog.event_type == event_type)
+    if date_from:
+        q = q.filter(BrowseLog.created_at >= date_from)
+    if date_to:
+        q = q.filter(BrowseLog.created_at <= date_to)
+    rows = q.order_by(BrowseLog.created_at.desc(), BrowseLog.id.desc()).offset((page - 1) * size).limit(size).all()
+    return [
+        {
+            "id": x.id,
+            "username": x.username,
+            "role": x.role,
+            "event_type": x.event_type,
+            "path": x.path,
+            "module": x.module,
+            "ip": x.ip,
+            "user_agent": x.user_agent,
+            "detail": x.detail,
+            "created_at": x.created_at,
+        }
+        for x in rows
+    ]
 
 
 # ── Upload ──
@@ -510,6 +940,7 @@ def _parse_paste_row(cells: List[str], broker: Optional[str]) -> Trade:
         pnl=pnl,
         status=status,
         notes=" | ".join(note_parts),
+        owner_role=_owner_role_value_for_create(),
     )
 
 
@@ -589,6 +1020,37 @@ def _apply_fill_to_state(state: Dict[str, Dict[str, Any]], fill: Trade):
 def _build_position_state_from_db(db: Session, source_keyword: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
     state: Dict[str, Dict[str, Any]] = {}
     q = db.query(Trade).filter(Trade.is_deleted == False, Trade.status == "open")  # noqa: E712
+    q = _apply_source_keyword_filter(q, source_keyword)
+    rows = q.order_by(Trade.open_time.asc(), Trade.id.asc()).all()
+    for t in rows:
+        symbol = _normalize_contract_symbol(t.contract or t.symbol or "")
+        side = t.direction
+        st = _ensure_symbol_state(state, symbol, side, t.contract, t.trade_date)
+        prev_qty = float(st["quantity"])
+        add_qty = float(t.quantity or 0)
+        if add_qty <= 0:
+            continue
+        total_qty = prev_qty + add_qty
+        prev_cost = float(st["avg_open_price"]) * prev_qty
+        st["avg_open_price"] = (prev_cost + float(t.open_price or 0) * add_qty) / total_qty
+        st["quantity"] = total_qty
+        if st["open_since"] is None:
+            st["open_since"] = t.trade_date
+        if t.open_time and (st["last_trade_date"] is None or t.trade_date >= st["last_trade_date"]):
+            st["last_trade_date"] = t.trade_date
+    return state
+
+
+def _build_position_state_from_db_with_owner_role(
+    db: Session,
+    source_keyword: Optional[str] = None,
+    owner_role: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    state: Dict[str, Dict[str, Any]] = {}
+    q = db.query(Trade).filter(Trade.is_deleted == False, Trade.status == "open")  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(Trade, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
     q = _apply_source_keyword_filter(q, source_keyword)
     rows = q.order_by(Trade.open_time.asc(), Trade.id.asc()).all()
     for t in rows:
@@ -703,6 +1165,7 @@ def _copy_trade_for_closed_part(src: Trade, close_qty: float, close_price: float
         error_tags=src.error_tags,
         review_note=src.review_note,
         notes=_append_note(src.notes, "来源: 自动平仓拆分"),
+        owner_role=src.owner_role or _owner_role_value_for_create(),
     )
 
 
@@ -720,6 +1183,7 @@ def _apply_close_fill_to_db(db: Session, fill: Trade, broker: Optional[str] = No
         Trade.symbol == symbol,
         Trade.direction == close_side,
         Trade.status == "open",
+        Trade.owner_role == (fill.owner_role or _owner_role_value_for_create()),
         Trade.trade_date <= fill.trade_date,
         or_(Trade.open_time.is_(None), Trade.open_time <= close_time),
     )
@@ -806,9 +1270,10 @@ def import_trades_from_paste(payload: TradePasteImportRequest, db: Session = Dep
 def list_trade_positions(
     symbol: Optional[str] = None,
     source_keyword: Optional[str] = None,
+    owner_role: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    state = _build_position_state_from_db(db, source_keyword=source_keyword)
+    state = _build_position_state_from_db_with_owner_role(db, source_keyword=source_keyword, owner_role=owner_role)
     rows = []
     for _, st in state.items():
         qty = float(st.get("quantity") or 0)
@@ -848,9 +1313,13 @@ def list_trades(
     max_star_rating: Optional[int] = Query(None, ge=1, le=5),
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = "desc",
+    owner_role: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(Trade).filter(Trade.is_deleted == False)  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(Trade, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
     if date_from:
         q = q.filter(Trade.trade_date >= date_from)
     if date_to:
@@ -916,6 +1385,7 @@ def list_trade_search_options(
     date_to: Optional[str] = None,
     status: Optional[str] = None,
     include_ids: Optional[str] = None,
+    owner_role: Optional[str] = None,
     limit: int = Query(30, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
@@ -926,6 +1396,9 @@ def list_trade_search_options(
         .filter(Trade.is_deleted == False)  # noqa: E712
         .outerjoin(TradeSourceMetadata, TradeSourceMetadata.trade_id == Trade.id)
     )
+    role_filter = _owner_role_filter_for_admin(Trade, owner_role)
+    if role_filter is not None:
+        query = query.filter(role_filter)
     if symbol:
         query = query.filter(Trade.symbol == symbol)
     if date_from:
@@ -954,12 +1427,11 @@ def list_trade_search_options(
 
     missing_include_ids = [tid for tid in include_trade_ids if tid not in collected_ids]
     if missing_include_ids:
-        include_rows = (
-            db.query(Trade)
-            .filter(Trade.id.in_(missing_include_ids), Trade.is_deleted == False)  # noqa: E712
-            .order_by(Trade.open_time.desc(), Trade.id.desc())
-            .all()
-        )
+        include_q = db.query(Trade).filter(Trade.id.in_(missing_include_ids), Trade.is_deleted == False)  # noqa: E712
+        include_role_filter = _owner_role_filter_for_admin(Trade, owner_role)
+        if include_role_filter is not None:
+            include_q = include_q.filter(include_role_filter)
+        include_rows = include_q.order_by(Trade.open_time.desc(), Trade.id.desc()).all()
         include_rows = _attach_trade_view_fields(db, include_rows)
         include_map = {x.id: x for x in include_rows if x.id}
         for trade_id in missing_include_ids:
@@ -1009,9 +1481,13 @@ def count_trades(
     is_favorite: Optional[bool] = None,
     min_star_rating: Optional[int] = Query(None, ge=1, le=5),
     max_star_rating: Optional[int] = Query(None, ge=1, le=5),
+    owner_role: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(Trade).filter(Trade.is_deleted == False)  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(Trade, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
     if date_from:
         q = q.filter(Trade.trade_date >= date_from)
     if date_to:
@@ -1043,9 +1519,13 @@ def get_statistics(
     instrument_type: Optional[str] = None,
     symbol: Optional[str] = None,
     source_keyword: Optional[str] = None,
+    owner_role: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(Trade).filter(Trade.is_deleted == False, Trade.status == "closed")  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(Trade, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
     if date_from:
         q = q.filter(Trade.trade_date >= date_from)
     if date_to:
@@ -1168,7 +1648,7 @@ def get_trade_analytics(
 
 @app.post("/api/trades", response_model=TradeResponse)
 def create_trade(trade: TradeCreate, db: Session = Depends(get_db)):
-    obj = Trade(**trade.model_dump())
+    obj = Trade(**trade.model_dump(), owner_role=_owner_role_value_for_create())
     db.add(obj)
     db.commit()
     db.refresh(obj)
@@ -1207,19 +1687,23 @@ def delete_trade(trade_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/trades/sources")
-def list_trade_sources(db: Session = Depends(get_db)):
-    return {"items": _source_list_trade_sources(db)}
+def list_trade_sources(owner_role: Optional[str] = None, db: Session = Depends(get_db)):
+    q = db.query(Trade).filter(Trade.is_deleted == False)  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(Trade, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
+    rows = q.all()
+    items = sorted({str(getattr(x, "source_display", "")).strip() for x in _attach_trade_view_fields(db, rows) if str(getattr(x, "source_display", "")).strip()})
+    return {"items": items}
 
 
 @app.get("/api/trades/symbols")
-def list_trade_symbols(db: Session = Depends(get_db)):
-    rows = (
-        db.query(Trade.symbol)
-        .filter(Trade.is_deleted == False, Trade.symbol.isnot(None))  # noqa: E712
-        .distinct()
-        .order_by(Trade.symbol.asc())
-        .all()
-    )
+def list_trade_symbols(owner_role: Optional[str] = None, db: Session = Depends(get_db)):
+    q = db.query(Trade.symbol).filter(Trade.is_deleted == False, Trade.symbol.isnot(None))  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(Trade, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
+    rows = q.distinct().order_by(Trade.symbol.asc()).all()
     items = [str(symbol).strip() for (symbol,) in rows if str(symbol or "").strip()]
     return {"items": items}
 
@@ -1348,13 +1832,12 @@ def upsert_trade_source_metadata(trade_id: int, data: TradeSourceMetadataUpsert,
 
 
 @app.get("/api/trade-brokers", response_model=List[TradeBrokerResponse])
-def list_trade_brokers(db: Session = Depends(get_db)):
-    return (
-        db.query(TradeBroker)
-        .filter(TradeBroker.is_deleted == False)  # noqa: E712
-        .order_by(TradeBroker.updated_at.desc(), TradeBroker.id.desc())
-        .all()
-    )
+def list_trade_brokers(owner_role: Optional[str] = None, db: Session = Depends(get_db)):
+    q = db.query(TradeBroker).filter(TradeBroker.is_deleted == False)  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(TradeBroker, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
+    return q.order_by(TradeBroker.updated_at.desc(), TradeBroker.id.desc()).all()
 
 
 @app.post("/api/trade-brokers", response_model=TradeBrokerResponse)
@@ -1381,6 +1864,7 @@ def create_trade_broker(data: TradeBrokerCreate, db: Session = Depends(get_db)):
         password=(data.password or "").strip() or None,
         extra_info=(data.extra_info or "").strip() or None,
         notes=(data.notes or "").strip() or None,
+        owner_role=_owner_role_value_for_create(),
     )
     db.add(obj)
     db.commit()
@@ -1437,14 +1921,20 @@ def list_knowledge_items(
     q: Optional[str] = None,
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
+    owner_role: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    scoped_owner_role = None
+    role_filter = _owner_role_filter_for_admin(KnowledgeItem, owner_role)
+    if role_filter is not None:
+        scoped_owner_role = owner_role
     rows = _knowledge_list_knowledge_items(
         db,
         category=category,
         status=status,
         tag=tag,
         keyword=q,
+        owner_role=scoped_owner_role,
         page=page,
         size=size,
     )
@@ -1453,8 +1943,9 @@ def list_knowledge_items(
 
 
 @app.get("/api/knowledge-items/categories")
-def list_knowledge_item_categories(db: Session = Depends(get_db)):
-    return {"items": _knowledge_list_categories(db)}
+def list_knowledge_item_categories(owner_role: Optional[str] = None, db: Session = Depends(get_db)):
+    _owner_role_filter_for_admin(KnowledgeItem, owner_role)
+    return {"items": _knowledge_list_categories(db, owner_role=owner_role if owner_role in {"admin", "user"} else None)}
 
 
 @app.post("/api/knowledge-items", response_model=KnowledgeItemResponse)
@@ -1462,7 +1953,7 @@ def create_knowledge_item(data: KnowledgeItemCreate, db: Session = Depends(get_d
     payload = _knowledge_normalize_payload(data.model_dump())
     tags_raw = payload.pop("tags", None) if "tags" in payload else None
     related_note_ids_raw = payload.pop("related_note_ids", None) if "related_note_ids" in payload else None
-    obj = KnowledgeItem(**payload)
+    obj = KnowledgeItem(**payload, owner_role=_owner_role_value_for_create())
     db.add(obj)
     db.flush()
     tag_names = _normalize_tag_list(tags_raw)
@@ -1611,8 +2102,12 @@ def _apply_trade_filters(
     is_favorite: Optional[bool] = None,
     min_star_rating: Optional[int] = None,
     max_star_rating: Optional[int] = None,
+    owner_role: Optional[str] = None,
 ):
     q = q.filter(Trade.is_deleted == False)  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(Trade, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
     if date_from:
         q = q.filter(Trade.trade_date >= date_from)
     if date_to:
@@ -1652,6 +2147,7 @@ def _build_trade_ids_from_filter(db: Session, filter_params: Dict[str, Any]) -> 
         is_favorite=filter_params.get("is_favorite"),
         min_star_rating=filter_params.get("min_star_rating"),
         max_star_rating=filter_params.get("max_star_rating"),
+        owner_role=filter_params.get("owner_role"),
     )
     rows = q.order_by(Trade.open_time.desc(), Trade.id.desc()).all()
     return [x.id for x in rows if x.id]
@@ -1662,6 +2158,7 @@ def _create_review_session_from_payload(db: Session, payload: Dict[str, Any], tr
     payload["review_kind"] = _review_session_normalize_kind(payload.get("review_kind"))
     payload["review_scope"] = _review_session_normalize_scope(payload.get("review_scope"))
     payload["selection_mode"] = _review_session_normalize_selection_mode(payload.get("selection_mode"))
+    payload["owner_role"] = payload.get("owner_role") or _owner_role_value_for_create()
     obj = ReviewSession(**payload)
     db.add(obj)
     db.flush()
@@ -1686,9 +2183,13 @@ def list_review_sessions(
     sort_order: Optional[str] = "desc",
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
+    owner_role: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(ReviewSession).filter(ReviewSession.is_deleted == False)  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(ReviewSession, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
     if review_kind:
         q = q.filter(ReviewSession.review_kind == _review_session_normalize_kind(review_kind))
     if review_scope:
@@ -1863,6 +2364,7 @@ def list_reviews(
     date_to: Optional[str] = None,
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
+    owner_role: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     kind_map = {
@@ -1884,6 +2386,7 @@ def list_reviews(
         sort_order=sort_order,
         page=page,
         size=size,
+        owner_role=owner_role,
         db=db,
     )
     if date_from or date_to:
@@ -2018,9 +2521,13 @@ def list_trade_plans(
     date_to: Optional[str] = None,
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
+    owner_role: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(TradePlan).filter(TradePlan.is_deleted == False)  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(TradePlan, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
     if status:
         q = q.filter(TradePlan.status == _trade_plan_normalize_status(status))
     if symbol:
@@ -2038,7 +2545,7 @@ def create_trade_plan(payload: TradePlanCreate, db: Session = Depends(get_db)):
     data = payload.model_dump(exclude={"trade_links"})
     tags_raw = data.pop("tags", None) if "tags" in data else None
     data["status"] = _trade_plan_normalize_status(data.get("status"))
-    obj = TradePlan(**data)
+    obj = TradePlan(**data, owner_role=_owner_role_value_for_create())
     db.add(obj)
     db.flush()
     obj.tags_text = _serialize_legacy_tags(_normalize_tag_list(tags_raw))
@@ -2145,6 +2652,7 @@ def create_followup_review_session_from_trade_plan(trade_plan_id: int, db: Sessi
             "research_notes": None,
             "tags": _parse_tags_text(plan.tags_text),
             "filter_snapshot_json": json.dumps({"source": "trade_plan", "trade_plan_id": plan.id}, ensure_ascii=False),
+            "owner_role": plan.owner_role,
         },
         trade_links,
     )
@@ -2376,13 +2884,17 @@ def purge_recycle_trade_plan(trade_plan_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/notebooks", response_model=List[NotebookResponse])
-def list_notebooks(db: Session = Depends(get_db)):
-    return db.query(Notebook).order_by(Notebook.sort_order, Notebook.id).all()
+def list_notebooks(owner_role: Optional[str] = None, db: Session = Depends(get_db)):
+    q = db.query(Notebook)
+    role_filter = _owner_role_filter_for_admin(Notebook, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
+    return q.order_by(Notebook.sort_order, Notebook.id).all()
 
 
 @app.post("/api/notebooks", response_model=NotebookResponse)
 def create_notebook(data: NotebookCreate, db: Session = Depends(get_db)):
-    obj = Notebook(**data.model_dump())
+    obj = Notebook(**data.model_dump(), owner_role=_owner_role_value_for_create())
     db.add(obj)
     db.commit()
     db.refresh(obj)
@@ -2422,11 +2934,15 @@ def list_notes(
     keyword: Optional[str] = None,
     tag: Optional[str] = None,
     is_pinned: Optional[bool] = None,
+    owner_role: Optional[str] = None,
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
     q = db.query(Note).filter(Note.is_deleted == False)  # noqa: E712
+    role_filter = _owner_role_filter_for_admin(Note, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
     if notebook_id:
         q = q.filter(Note.notebook_id == notebook_id)
     if note_type:
@@ -2849,7 +3365,7 @@ def create_note(data: NoteCreate, db: Session = Depends(get_db)):
     nb = db.query(Notebook).filter(Notebook.id == data.notebook_id).first()
     if not nb:
         raise HTTPException(404, "Notebook not found")
-    obj = Note(**data.model_dump())
+    obj = Note(**data.model_dump(), owner_role=nb.owner_role or _owner_role_value_for_create())
     db.add(obj)
     db.commit()
     db.refresh(obj)
@@ -2959,9 +3475,13 @@ def clear_recycle_notes(
 def list_todos(
     include_completed: bool = Query(True),
     keyword: Optional[str] = Query(None),
+    owner_role: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(TodoItem)
+    role_filter = _owner_role_filter_for_admin(TodoItem, owner_role)
+    if role_filter is not None:
+        q = q.filter(role_filter)
     if not include_completed:
         q = q.filter(TodoItem.is_completed == False)  # noqa: E712
     if keyword and keyword.strip():
@@ -2984,6 +3504,7 @@ def create_todo(data: TodoCreate, db: Session = Depends(get_db)):
     if not content:
         raise HTTPException(400, "待办内容不能为空")
     priority = _normalize_todo_priority(data.priority)
+    src = None
     if data.source_note_id is not None:
         src = db.query(Note).filter(Note.id == data.source_note_id).first()
         if not src:
@@ -2998,6 +3519,7 @@ def create_todo(data: TodoCreate, db: Session = Depends(get_db)):
         source_anchor_text=(data.source_anchor_text or "").strip() or None,
         due_at=data.due_at,
         reminder_at=data.reminder_at,
+        owner_role=(src.owner_role if src else _owner_role_value_for_create()),
     )
     db.add(obj)
     db.commit()
@@ -3232,6 +3754,87 @@ _monitor_thread = threading.Thread(target=_monitor_loop, daemon=True)
 _monitor_thread.start()
 
 
+BROWSE_LOG_RETENTION_DAYS = 180
+
+
+def _cleanup_old_browse_logs():
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now() - timedelta(days=BROWSE_LOG_RETENTION_DAYS)
+        db.query(BrowseLog).filter(BrowseLog.created_at < cutoff).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _maintenance_loop():
+    while True:
+        try:
+            _cleanup_old_browse_logs()
+        except Exception:
+            pass
+        _time.sleep(3600)
+
+
+def _check_single_site(site: MonitorSite) -> Dict[str, Any]:
+    started = _time.time()
+    timeout_sec = max(2, min(60, int(site.timeout_sec or 8)))
+    try:
+        with httpx.Client(timeout=timeout_sec, follow_redirects=True) as client:
+            resp = client.get(site.url)
+            elapsed_ms = int((_time.time() - started) * 1000)
+            ok = 200 <= int(resp.status_code) < 400
+            return {
+                "status_code": int(resp.status_code),
+                "response_ms": elapsed_ms,
+                "ok": ok,
+                "error": None if ok else f"http {resp.status_code}",
+            }
+    except Exception as exc:
+        elapsed_ms = int((_time.time() - started) * 1000)
+        return {"status_code": None, "response_ms": elapsed_ms, "ok": False, "error": str(exc)[:500]}
+
+
+def _site_monitor_loop():
+    while True:
+        db = SessionLocal()
+        try:
+            now = datetime.now()
+            rows = db.query(MonitorSite).filter(MonitorSite.enabled == True).all()  # noqa: E712
+            for site in rows:
+                interval_sec = max(10, min(3600, int(site.interval_sec or 60)))
+                if site.last_checked_at and (now - site.last_checked_at).total_seconds() < interval_sec:
+                    continue
+                result = _check_single_site(site)
+                site.last_checked_at = now
+                site.last_status_code = result["status_code"]
+                site.last_response_ms = result["response_ms"]
+                site.last_ok = bool(result["ok"])
+                site.last_error = result["error"]
+                db.add(
+                    MonitorSiteResult(
+                        site_id=site.id,
+                        status_code=result["status_code"],
+                        response_ms=result["response_ms"],
+                        ok=bool(result["ok"]),
+                        error=result["error"],
+                    )
+                )
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+        _time.sleep(5)
+
+
+_maintenance_thread = threading.Thread(target=_maintenance_loop, daemon=True)
+_maintenance_thread.start()
+
+_site_monitor_thread = threading.Thread(target=_site_monitor_loop, daemon=True)
+_site_monitor_thread.start()
+
+
 def _get_system_info():
     import platform
     boot = psutil.boot_time()
@@ -3386,6 +3989,7 @@ def _get_services_status():
 
 @app.get("/api/monitor/realtime")
 def monitor_realtime():
+    _require_admin()
     return {
         "system": _get_system_info(),
         "cpu": _get_cpu_info(),
@@ -3399,4 +4003,144 @@ def monitor_realtime():
 
 @app.get("/api/monitor/history")
 def monitor_history():
+    _require_admin()
     return list(_monitor_history)
+
+
+@app.get("/api/monitor/sites")
+def monitor_sites(db: Session = Depends(get_db)):
+    _require_admin()
+    rows = db.query(MonitorSite).order_by(MonitorSite.updated_at.desc(), MonitorSite.id.desc()).all()
+    return [
+        {
+            "id": x.id,
+            "name": x.name,
+            "url": x.url,
+            "enabled": bool(x.enabled),
+            "interval_sec": x.interval_sec,
+            "timeout_sec": x.timeout_sec,
+            "last_checked_at": x.last_checked_at,
+            "last_status_code": x.last_status_code,
+            "last_response_ms": x.last_response_ms,
+            "last_ok": x.last_ok,
+            "last_error": x.last_error,
+            "created_at": x.created_at,
+            "updated_at": x.updated_at,
+        }
+        for x in rows
+    ]
+
+
+@app.post("/api/monitor/sites")
+def create_monitor_site(payload: MonitorSiteCreateBody, request: Request, db: Session = Depends(get_db)):
+    _require_admin()
+    name = (payload.name or "").strip()
+    url = (payload.url or "").strip()
+    if not name:
+        raise HTTPException(400, "name 不能为空")
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "url 必须以 http:// 或 https:// 开头")
+    row = MonitorSite(
+        name=name,
+        url=url,
+        enabled=bool(payload.enabled),
+        interval_sec=max(10, min(3600, int(payload.interval_sec or 60))),
+        timeout_sec=max(2, min(60, int(payload.timeout_sec or 8))),
+    )
+    db.add(row)
+    _write_browse_log(
+        db,
+        username=_current_username(),
+        role=_current_role(),
+        event_type="action",
+        path="/api/monitor/sites",
+        module="monitor_site",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        detail=f"create site {name}",
+    )
+    db.commit()
+    db.refresh(row)
+    return {"ok": True, "id": row.id}
+
+
+@app.put("/api/monitor/sites/{site_id}")
+def update_monitor_site(site_id: int, payload: MonitorSiteUpdateBody, request: Request, db: Session = Depends(get_db)):
+    _require_admin()
+    row = db.query(MonitorSite).filter(MonitorSite.id == site_id).first()
+    if not row:
+        raise HTTPException(404, "site not found")
+    updates = payload.model_dump(exclude_unset=True)
+    if "name" in updates:
+        row.name = (updates.get("name") or "").strip() or row.name
+    if "url" in updates:
+        url = (updates.get("url") or "").strip()
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(400, "url 必须以 http:// 或 https:// 开头")
+        row.url = url
+    if "enabled" in updates:
+        row.enabled = bool(updates.get("enabled"))
+    if "interval_sec" in updates and updates.get("interval_sec") is not None:
+        row.interval_sec = max(10, min(3600, int(updates.get("interval_sec"))))
+    if "timeout_sec" in updates and updates.get("timeout_sec") is not None:
+        row.timeout_sec = max(2, min(60, int(updates.get("timeout_sec"))))
+    _write_browse_log(
+        db,
+        username=_current_username(),
+        role=_current_role(),
+        event_type="action",
+        path=f"/api/monitor/sites/{site_id}",
+        module="monitor_site",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        detail=f"update site {row.name}",
+    )
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/monitor/sites/{site_id}")
+def delete_monitor_site(site_id: int, request: Request, db: Session = Depends(get_db)):
+    _require_admin()
+    row = db.query(MonitorSite).filter(MonitorSite.id == site_id).first()
+    if not row:
+        raise HTTPException(404, "site not found")
+    db.query(MonitorSiteResult).filter(MonitorSiteResult.site_id == site_id).delete(synchronize_session=False)
+    db.delete(row)
+    _write_browse_log(
+        db,
+        username=_current_username(),
+        role=_current_role(),
+        event_type="action",
+        path=f"/api/monitor/sites/{site_id}",
+        module="monitor_site",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        detail=f"delete site {site_id}",
+    )
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/monitor/sites/{site_id}/results")
+def monitor_site_results(site_id: int, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
+    _require_admin()
+    rows = (
+        db.query(MonitorSiteResult)
+        .filter(MonitorSiteResult.site_id == site_id)
+        .order_by(MonitorSiteResult.created_at.desc(), MonitorSiteResult.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": x.id,
+            "site_id": x.site_id,
+            "status_code": x.status_code,
+            "response_ms": x.response_ms,
+            "ok": bool(x.ok),
+            "error": x.error,
+            "created_at": x.created_at,
+        }
+        for x in rows
+    ]

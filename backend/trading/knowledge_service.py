@@ -43,10 +43,13 @@ def list_knowledge_items(
     status: Optional[str],
     tag: Optional[str],
     keyword: Optional[str],
+    owner_role: Optional[str] = None,
     page: int,
     size: int,
 ) -> List[KnowledgeItem]:
     query = db.query(KnowledgeItem).filter(KnowledgeItem.is_deleted == False)  # noqa: E712
+    if owner_role in {"admin", "user"}:
+        query = query.filter(KnowledgeItem.owner_role == owner_role)
     if category:
         query = query.filter(KnowledgeItem.category == category)
     if status:
@@ -74,13 +77,14 @@ def list_knowledge_items(
     )
 
 
-def list_knowledge_categories(db: Session) -> List[str]:
+def list_knowledge_categories(db: Session, owner_role: Optional[str] = None) -> List[str]:
     values = set(KNOWLEDGE_CATEGORY_VALUES)
-    rows = (
-        db.query(KnowledgeItem.category)
-        .filter(KnowledgeItem.is_deleted == False, KnowledgeItem.category.isnot(None))  # noqa: E712
-        .all()
+    query = db.query(KnowledgeItem.category).filter(
+        KnowledgeItem.is_deleted == False, KnowledgeItem.category.isnot(None)  # noqa: E712
     )
+    if owner_role in {"admin", "user"}:
+        query = query.filter(KnowledgeItem.owner_role == owner_role)
+    rows = query.all()
     for (category,) in rows:
         if category and str(category).strip():
             values.add(str(category).strip())

@@ -1,4 +1,5 @@
-﻿import { BrowserRouter, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
+﻿import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import {
   DashboardOutlined,
   OrderedListOutlined,
@@ -65,12 +66,20 @@ function IconSidebar() {
 }
 
 function AppLayout() {
+  const location = useLocation();
+  useEffect(() => {
+    api.post('/audit/track', {
+      path: `/trading${location.pathname || '/'}`,
+      module: 'trading',
+      detail: 'page view',
+    }).catch(() => {});
+  }, [location.pathname]);
   return (
     <div className="app-layout">
       <IconSidebar />
       <div className="app-content">
         <Routes>
-          <Route path="/" element={<Navigate to="/trades" replace />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/trades" element={<TradeList />} />
           <Route path="/trades/new" element={<TradeForm />} />
@@ -92,3 +101,4 @@ export default function App() {
     </BrowserRouter>
   );
 }
+

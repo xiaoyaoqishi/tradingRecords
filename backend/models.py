@@ -81,6 +81,7 @@ class Trade(Base):
     notes = Column(Text)
     is_favorite = Column(Boolean, default=False)
     star_rating = Column(Integer, nullable=True)
+    owner_role = Column(String(20), default="admin", index=True)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True)
     trade_review = relationship("TradeReview", back_populates="trade", uselist=False, cascade="all, delete-orphan")
@@ -222,6 +223,7 @@ class ReviewSession(Base):
     filter_snapshot_json = Column(Text)
     is_favorite = Column(Boolean, default=False)
     star_rating = Column(Integer, nullable=True)
+    owner_role = Column(String(20), default="admin", index=True)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True)
 
@@ -275,6 +277,7 @@ class TradePlan(Base):
     source_ref = Column(String(200))
     post_result_summary = Column(Text)
     research_notes = Column(Text)
+    owner_role = Column(String(20), default="admin", index=True)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True)
 
@@ -339,6 +342,7 @@ class KnowledgeItem(Base):
     next_action = Column(Text)
     due_date = Column(Date)
     source_ref = Column(String(200))
+    owner_role = Column(String(20), default="admin", index=True)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True)
     tag_links = relationship("KnowledgeItemTagLink", back_populates="knowledge_item", cascade="all, delete-orphan")
@@ -433,6 +437,7 @@ class Notebook(Base):
     icon = Column(String(10), default="📁")
     parent_id = Column(Integer, ForeignKey("notebooks.id"), nullable=True)
     sort_order = Column(Integer, default=0)
+    owner_role = Column(String(20), default="admin", index=True)
 
     notes = relationship("Note", back_populates="notebook", cascade="all, delete-orphan")
 
@@ -452,6 +457,7 @@ class Note(Base):
     tags = Column(Text)
     is_pinned = Column(Boolean, default=False)
     word_count = Column(Integer, default=0)
+    owner_role = Column(String(20), default="admin", index=True)
     is_deleted = Column(Boolean, default=False)
     deleted_at = Column(DateTime, nullable=True)
 
@@ -485,6 +491,7 @@ class TodoItem(Base):
     source_anchor_text = Column(Text, nullable=True)
     due_at = Column(DateTime, nullable=True)
     reminder_at = Column(DateTime, nullable=True)
+    owner_role = Column(String(20), default="admin", index=True)
 
 
 class TradeBroker(Base):
@@ -499,5 +506,69 @@ class TradeBroker(Base):
     password = Column(String(200), nullable=True)
     extra_info = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    owner_role = Column(String(20), default="admin", index=True)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    username = Column(String(100), nullable=False, unique=True, index=True)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(20), nullable=False, default="user", index=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+
+class BrowseLog(Base):
+    __tablename__ = "browse_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+    username = Column(String(100), nullable=False, index=True)
+    role = Column(String(20), nullable=False, index=True)
+    event_type = Column(String(20), nullable=False, index=True)  # page_view / action
+    path = Column(String(300), nullable=False, index=True)
+    module = Column(String(100), nullable=True, index=True)
+    ip = Column(String(100), nullable=True)
+    user_agent = Column(String(300), nullable=True)
+    detail = Column(Text, nullable=True)
+
+
+class MonitorSite(Base):
+    __tablename__ = "monitor_sites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    name = Column(String(150), nullable=False, index=True)
+    url = Column(String(500), nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    interval_sec = Column(Integer, default=60, nullable=False)
+    timeout_sec = Column(Integer, default=8, nullable=False)
+    last_checked_at = Column(DateTime, nullable=True)
+    last_status_code = Column(Integer, nullable=True)
+    last_response_ms = Column(Integer, nullable=True)
+    last_ok = Column(Boolean, nullable=True)
+    last_error = Column(Text, nullable=True)
+
+
+class MonitorSiteResult(Base):
+    __tablename__ = "monitor_site_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+    site_id = Column(Integer, ForeignKey("monitor_sites.id"), nullable=False, index=True)
+    status_code = Column(Integer, nullable=True)
+    response_ms = Column(Integer, nullable=True)
+    ok = Column(Boolean, nullable=False, default=False, index=True)
+    error = Column(Text, nullable=True)
+
+    site = relationship("MonitorSite")

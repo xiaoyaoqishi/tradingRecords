@@ -47,4 +47,8 @@ export const todoApi = {
   delete: (id) => api.delete(`/todos/${id}`),
 };
 
+export const auditApi = {
+  track: (data) => api.post('/audit/track', data),
+};
+
 export default api;
