@@ -627,6 +627,8 @@ def auth_setup(body: LoginBody):
 @app.post("/api/auth/login")
 def auth_login(body: LoginBody, response: Response, request: Request):
     db = SessionLocal()
+    login_username = (body.username or "").strip()
+    login_role = "user"
     try:
         user = db.query(User).filter(User.username == body.username).first()
         if not user:
@@ -643,13 +645,15 @@ def auth_login(body: LoginBody, response: Response, request: Request):
                 password_ok = True
         if not password_ok:
             raise HTTPException(401, "用户名或密码错误")
+        login_username = user.username
+        login_role = (user.role or "user").strip().lower() or "user"
         token = create_token(user.username)
         db.commit()
         try:
             _write_browse_log(
                 db,
-                username=user.username,
-                role=user.role or "user",
+                username=login_username,
+                role=login_role,
                 event_type="action",
                 path="/api/auth/login",
                 module="auth",
@@ -666,8 +670,7 @@ def auth_login(body: LoginBody, response: Response, request: Request):
         AUTH_COOKIE, token,
         max_age=7 * 86400, httponly=True, samesite="lax", path="/", secure=COOKIE_SECURE,
     )
-    role = user.role if "user" in locals() and user else "user"
-    return {"ok": True, "username": body.username, "role": role, "is_admin": role == "admin"}
+    return {"ok": True, "username": login_username, "role": login_role, "is_admin": login_role == "admin"}
 
 
 @app.post("/api/auth/logout")
