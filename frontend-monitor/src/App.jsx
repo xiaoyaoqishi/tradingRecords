@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Input, message, Modal, Popconfirm, Space, Table, Tag } from 'antd';
+import { Button, Card, DatePicker, Input, message, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd';
 import {
   ArrowLeftOutlined,
   DesktopOutlined,
@@ -251,7 +251,7 @@ function SitePanel() {
 function UserPanel() {
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState({ username: '', password: '' });
-  const [pwdModal, setPwdModal] = useState({ open: false, userId: null, password: '' });
+  const [editModal, setEditModal] = useState({ open: false, userId: null, username: '', role: 'user', password: '' });
 
   const load = async () => {
     const res = await userAdminApi.list();
@@ -265,6 +265,7 @@ function UserPanel() {
     if (!form.username.trim() || !form.password.trim()) return;
     await userAdminApi.create(form);
     setForm({ username: '', password: '' });
+    message.success('创建成功');
     await load();
   };
 
@@ -316,9 +317,33 @@ function UserPanel() {
                   >
                     {r.is_active ? '停用' : '启用'}
                   </Button>
-                  <Button size="small" onClick={() => setPwdModal({ open: true, userId: r.id, password: '' })}>
-                    重置密码
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      setEditModal({
+                        open: true,
+                        userId: r.id,
+                        username: r.username,
+                        role: r.role || 'user',
+                        password: '',
+                      })
+                    }
+                  >
+                    编辑
                   </Button>
+                  <Popconfirm
+                    title={`确认删除用户 ${r.username}？`}
+                    disabled={r.username === 'xiaoyao'}
+                    onConfirm={async () => {
+                      await userAdminApi.remove(r.id);
+                      message.success('删除成功');
+                      await load();
+                    }}
+                  >
+                    <Button size="small" danger disabled={r.username === 'xiaoyao'}>
+                      删除
+                    </Button>
+                  </Popconfirm>
                 </Space>
               ),
             },
@@ -326,21 +351,35 @@ function UserPanel() {
         />
       </Card>
       <Modal
-        title="重置密码"
-        open={pwdModal.open}
-        onCancel={() => setPwdModal({ open: false, userId: null, password: '' })}
+        title="编辑用户"
+        open={editModal.open}
+        onCancel={() => setEditModal({ open: false, userId: null, username: '', role: 'user', password: '' })}
         onOk={async () => {
-          if (!pwdModal.userId || !pwdModal.password.trim()) return;
-          await userAdminApi.resetPassword(pwdModal.userId, { password: pwdModal.password });
-          setPwdModal({ open: false, userId: null, password: '' });
+          if (!editModal.userId) return;
+          const payload = { role: editModal.role };
+          if (editModal.password.trim()) payload.password = editModal.password.trim();
+          await userAdminApi.update(editModal.userId, payload);
+          message.success('更新成功');
+          setEditModal({ open: false, userId: null, username: '', role: 'user', password: '' });
           await load();
         }}
       >
-        <Input.Password
-          placeholder="新密码"
-          value={pwdModal.password}
-          onChange={(e) => setPwdModal((s) => ({ ...s, password: e.target.value }))}
-        />
+        <Space direction="vertical" style={{ width: '100%' }} size={10}>
+          <Input value={editModal.username} disabled />
+          <Select
+            value={editModal.role}
+            onChange={(v) => setEditModal((s) => ({ ...s, role: v }))}
+            options={[
+              { label: '管理员', value: 'admin' },
+              { label: '普通用户', value: 'user' },
+            ]}
+          />
+          <Input.Password
+            placeholder="新密码（留空则不修改）"
+            value={editModal.password}
+            onChange={(e) => setEditModal((s) => ({ ...s, password: e.target.value }))}
+          />
+        </Space>
       </Modal>
     </Space>
   );
@@ -348,35 +387,175 @@ function UserPanel() {
 
 function AuditPanel() {
   const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [filters, setFilters] = useState({
+    username: '',
+    module: '',
+    event_type: '',
+    keyword: '',
+    date_from: '',
+    date_to: '',
+  });
 
-  const load = async () => {
-    const res = await auditApi.list({ page: 1, size: 100 });
-    setRows(Array.isArray(res.data) ? res.data : []);
+  const load = async (next = {}) => {
+    const nextPage = next.page ?? page;
+    const nextSize = next.size ?? size;
+    setLoading(true);
+    try {
+      const params = { page: nextPage, size: nextSize };
+      if (filters.username.trim()) params.username = filters.username.trim();
+      if (filters.module.trim()) params.module = filters.module.trim();
+      if (filters.event_type) params.event_type = filters.event_type;
+      if (filters.keyword.trim()) params.keyword = filters.keyword.trim();
+      if (filters.date_from) params.date_from = filters.date_from;
+      if (filters.date_to) params.date_to = filters.date_to;
+
+      const res = await auditApi.list(params);
+      const data = res?.data || {};
+      setRows(Array.isArray(data.items) ? data.items : []);
+      setTotal(Number(data.total || 0));
+      setPage(Number(data.page || nextPage));
+      setSize(Number(data.size || nextSize));
+    } finally {
+      setLoading(false);
+    }
   };
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const removeOne = async (id) => {
+    await auditApi.remove(id);
+    message.success('删除成功');
+    setSelectedRowKeys((prev) => prev.filter((x) => x !== id));
+    await load();
+  };
+
+  const removeBatch = async () => {
+    if (!selectedRowKeys.length) return;
+    await Promise.all(selectedRowKeys.map((id) => auditApi.remove(id)));
+    message.success(`已删除 ${selectedRowKeys.length} 条记录`);
+    setSelectedRowKeys([]);
+    await load();
+  };
 
   return (
     <Card title="浏览与操作记录">
+      <Space wrap style={{ marginBottom: 12 }}>
+        <Input
+          placeholder="按用户筛选"
+          value={filters.username}
+          onChange={(e) => setFilters((s) => ({ ...s, username: e.target.value }))}
+          style={{ width: 140 }}
+        />
+        <Select
+          placeholder="类型"
+          value={filters.event_type || undefined}
+          onChange={(v) => setFilters((s) => ({ ...s, event_type: v || '' }))}
+          allowClear
+          style={{ width: 120 }}
+          options={[
+            { label: '浏览', value: 'page_view' },
+            { label: '操作', value: 'action' },
+          ]}
+        />
+        <Select
+          placeholder="模块"
+          value={filters.module || undefined}
+          onChange={(v) => setFilters((s) => ({ ...s, module: v || '' }))}
+          allowClear
+          style={{ width: 150 }}
+          options={[
+            { label: '登录认证', value: 'auth' },
+            { label: '审计日志', value: 'audit' },
+            { label: '网站监控首页', value: 'monitor_home' },
+            { label: '站点巡检', value: 'monitor_site' },
+            { label: '用户管理', value: 'user_admin' },
+            { label: '笔记应用', value: 'notes' },
+            { label: '交易记录', value: 'trading' },
+          ]}
+        />
+        <Input
+          placeholder="关键词（路径/详情）"
+          value={filters.keyword}
+          onChange={(e) => setFilters((s) => ({ ...s, keyword: e.target.value }))}
+          style={{ width: 180 }}
+        />
+        <DatePicker placeholder="开始日期" onChange={(_, text) => setFilters((s) => ({ ...s, date_from: text || '' }))} />
+        <DatePicker placeholder="结束日期" onChange={(_, text) => setFilters((s) => ({ ...s, date_to: text || '' }))} />
+        <Button
+          type="primary"
+          onClick={async () => {
+            setPage(1);
+            await load({ page: 1 });
+          }}
+        >
+          筛选
+        </Button>
+        <Button
+          onClick={async () => {
+            setFilters({ username: '', module: '', event_type: '', keyword: '', date_from: '', date_to: '' });
+            setPage(1);
+            await load({ page: 1 });
+          }}
+        >
+          重置
+        </Button>
+        <Popconfirm title={`确认删除选中的 ${selectedRowKeys.length} 条记录？`} onConfirm={removeBatch} disabled={!selectedRowKeys.length}>
+          <Button danger disabled={!selectedRowKeys.length}>
+            批量删除
+          </Button>
+        </Popconfirm>
+      </Space>
       <Table
         rowKey="id"
+        loading={loading}
         dataSource={rows}
         size="small"
-        pagination={false}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys) => setSelectedRowKeys(keys),
+        }}
+        pagination={{
+          current: page,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          showTotal: (n) => `共 ${n} 条`,
+        }}
+        onChange={(p) => {
+          load({ page: p.current || 1, size: p.pageSize || 20 });
+        }}
         columns={[
           {
             title: '时间',
             dataIndex: 'created_at',
             key: 'created_at',
-            render: (v) => (v ? String(v).replace('T', ' ').slice(0, 19) : '-'),
+            render: (_, r) => r.created_at_zh || '-',
           },
           { title: '用户', dataIndex: 'username', key: 'username' },
           { title: '角色', dataIndex: 'role', key: 'role' },
-          { title: '类型', dataIndex: 'event_type', key: 'event_type' },
+          { title: '类型', dataIndex: 'event_type_zh', key: 'event_type_zh' },
           { title: '路径', dataIndex: 'path', key: 'path', ellipsis: true },
-          { title: '模块', dataIndex: 'module', key: 'module' },
-          { title: '详情', dataIndex: 'detail', key: 'detail', ellipsis: true },
+          { title: '模块', dataIndex: 'module_zh', key: 'module_zh' },
+          { title: '详情', dataIndex: 'detail_zh', key: 'detail_zh', ellipsis: true },
+          {
+            title: '操作',
+            key: 'op',
+            width: 88,
+            render: (_, r) => (
+              <Popconfirm title="确认删除该记录？" onConfirm={() => removeOne(r.id)}>
+                <Button danger size="small">
+                  删除
+                </Button>
+              </Popconfirm>
+            ),
+          },
         ]}
       />
     </Card>

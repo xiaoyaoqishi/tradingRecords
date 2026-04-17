@@ -31,6 +31,8 @@ export const monitorApi = {
 export const userAdminApi = {
   list: () => api.get('/admin/users'),
   create: (data) => api.post('/admin/users', data),
+  update: (id, data) => api.put(`/admin/users/${id}`, data),
+  remove: (id) => api.delete(`/admin/users/${id}`),
   toggleActive: (id) => api.post(`/admin/users/${id}/toggle-active`),
   resetPassword: (id, data) => api.post(`/admin/users/${id}/reset-password`, data),
 };
@@ -38,6 +40,7 @@ export const userAdminApi = {
 export const auditApi = {
   track: (data) => api.post('/audit/track', data),
   list: (params) => api.get('/audit/logs', { params }),
+  remove: (id) => api.delete(`/audit/logs/${id}`),
 };
 
 export default api;

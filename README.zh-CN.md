@@ -52,8 +52,9 @@ Trading Records Workspace
 - 业务数据按 `owner_role` 角色域隔离（`admin` 可看全量；`user` 仅看 `user` 域）。
 - 网站监控应用升级为子模块结构：服务器监控、站点巡检、用户管理、浏览记录。
 - 监控权限双保险：前端隐藏 + 后端鉴权拦截（普通用户访问监控/管理接口返回 `403`）。
+- 用户管理支持编辑角色/密码与删除用户账号（保留管理员账号受保护）。
 - 站点巡检目标管理与结果历史接口（`/api/monitor/sites*`）。
-- 浏览/操作记录接口（`/api/audit/track`、`/api/audit/logs`），含管理员记录，保留 180 天。
+- 浏览/操作记录接口（`/api/audit/track`、`/api/audit/logs`）：不记录管理员、保留 180 天，支持分页/筛选/删除，并返回中国时间与中文标签字段。
 - 服务器监控接口（`/api/monitor/realtime`、`/api/monitor/history`）基于 `psutil` 且仅管理员可用。
 - 非开发模式下 `/api/*` 的 Cookie 鉴权中间件。
 - `./dev.sh down` 的残留进程清理已增强，兼容混合 shell/Windows 场景（更宽松的 Vite 识别 + 进程树终止）。
@@ -286,6 +287,8 @@ cd ../frontend-monitor && npm run build
 - 前端 Axios 拦截 `401` 并跳转 `/login`。
 - 管理员接口：
   - `GET/POST /api/admin/users`
+  - `PUT /api/admin/users/{id}`
+  - `DELETE /api/admin/users/{id}`
   - `POST /api/admin/users/{id}/toggle-active`
   - `POST /api/admin/users/{id}/reset-password`
 - 监控接口：
@@ -294,7 +297,8 @@ cd ../frontend-monitor && npm run build
   - `GET /api/monitor/sites/{id}/results`
 - 审计接口：
   - `POST /api/audit/track`
-  - `GET /api/audit/logs`（仅管理员）
+  - `GET /api/audit/logs`（仅管理员；支持 `page/size/username/module/event_type/keyword/date_from/date_to`）
+  - `DELETE /api/audit/logs/{id}`（仅管理员）
 - 笔记编辑器与交易研究面板图片都通过 `/api/upload` 上传。
 - 交易模块回收站接口：
   - `GET /api/recycle/{trades|knowledge-items|trade-brokers|review-sessions|trade-plans}`

@@ -52,8 +52,9 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 - Role-domain data isolation on business entities via `owner_role` (`admin` can view all domains; `user` sees only `user` domain).
 - Website monitor app with submodules: server monitor, site availability checks, user management, and browse/audit logs.
 - Monitor access control is enforced both in frontend visibility and backend authorization (`user` gets `403` on monitor/admin APIs).
+- User management supports editing role/password and deleting user accounts (reserved admin account protected).
 - Site monitor target CRUD + polling result history APIs (`/api/monitor/sites*`).
-- Browse tracking APIs (`/api/audit/track`, `/api/audit/logs`) with 180-day retention, including admin activity.
+- Browse tracking APIs (`/api/audit/track`, `/api/audit/logs`) with 180-day retention, excluding admin records; logs support pagination/filtering/deletion and return CN time + Chinese labels.
 - Server monitor APIs (`/api/monitor/realtime`, `/api/monitor/history`) backed by `psutil` and restricted to admin.
 - Cookie-based authentication middleware for `/api/*` in non-dev mode.
 - `./dev.sh down` orphan cleanup is hardened for mixed shell/Windows scenarios (broader Vite process matching + process-tree termination).
@@ -287,6 +288,8 @@ Frontend monitor app (`frontend-monitor`) polls these endpoints and renders dash
 - Frontend axios interceptors redirect `401` responses to `/login`.
 - Admin APIs:
   - `GET/POST /api/admin/users`
+  - `PUT /api/admin/users/{id}`
+  - `DELETE /api/admin/users/{id}`
   - `POST /api/admin/users/{id}/toggle-active`
   - `POST /api/admin/users/{id}/reset-password`
 - Monitor APIs:
@@ -295,7 +298,8 @@ Frontend monitor app (`frontend-monitor`) polls these endpoints and renders dash
   - `GET /api/monitor/sites/{id}/results`
 - Audit APIs:
   - `POST /api/audit/track`
-  - `GET /api/audit/logs` (admin-only)
+  - `GET /api/audit/logs` (admin-only; supports `page/size/username/module/event_type/keyword/date_from/date_to`)
+  - `DELETE /api/audit/logs/{id}` (admin-only)
 - Notes module and trading research panels upload images through `/api/upload`.
 - Knowledge item API fields:
   - `POST/PUT /api/knowledge-items`: optional `related_note_ids: number[]` for linked doc notes (`note_type=doc` only).
