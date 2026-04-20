@@ -18,6 +18,12 @@ run_privileged() {
   exit 1
 }
 
+clean_frontend_dist() {
+  local app_dir="$1"
+  cd "$app_dir"
+  run_privileged rm -rf dist
+}
+
 echo "=== 拉取最新代码 ==="
 git pull
 
@@ -28,21 +34,25 @@ pip3 install -r requirements.txt --break-system-packages -q
 echo "=== 构建交易前端 ==="
 cd ../frontend
 npm install
+clean_frontend_dist "$(pwd)"
 npm run build
 
 echo "=== 构建笔记前端 ==="
 cd ../frontend-notes
 npm install
+clean_frontend_dist "$(pwd)"
 npm run build
 
 echo "=== 构建监控前端 ==="
 cd ../frontend-monitor
 npm install
+clean_frontend_dist "$(pwd)"
 npm run build
 
 echo "=== 构建记账前端 ==="
 cd ../frontend-ledger
 npm install
+clean_frontend_dist "$(pwd)"
 npm run build
 
 echo "=== 同步门户页面 ==="

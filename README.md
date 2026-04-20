@@ -334,6 +334,7 @@ Current deployment assets are Linux-oriented and expect `/opt/tradingRecords`:
 - `deploy/trading.service` runs `python3 -m uvicorn main:app --host 127.0.0.1 --port 8000` in `/opt/tradingRecords/backend`.
 - `deploy/nginx.conf` exposes portal/apps under `/`, `/trading/`, `/notes/`, `/monitor/`, `/ledger/`, and proxies `/api/`.
 - `deploy/update.sh` performs `git pull`, installs backend deps, builds all frontends (including `frontend-ledger`), updates portal files, and restarts `nginx` + `trading` service.
+- `deploy/update.sh` now removes each frontend `dist` directory with privileged cleanup before build to avoid stale-file permission errors (`EACCES unlink`).
 - When triggered by non-root users (for example `admin`), `deploy/update.sh` uses `sudo` for privileged steps (`nginx`/`systemctl`), so that user must have corresponding sudo permissions.
 - Local one-command trigger (without manually logging into server):
   - `PROD_HOST=<server_ip> PROD_USER=admin bash deploy/remote-update.sh`
