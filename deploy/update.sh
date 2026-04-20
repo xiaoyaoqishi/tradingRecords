@@ -40,6 +40,11 @@ cd ../frontend-monitor
 npm install
 npm run build
 
+echo "=== 构建记账前端 ==="
+cd ../frontend-ledger
+npm install
+npm run build
+
 echo "=== 同步门户页面 ==="
 for src in ../portal/*.html; do
   dst="/opt/tradingRecords/portal/$(basename "$src")"

@@ -105,7 +105,7 @@ next_unique_service_name() {
 build_services() {
   SERVICES=(
     "backend|$ROOT_DIR/backend|DEV_MODE=1 $PYTHON_CMD -m uvicorn main:app --host 127.0.0.1 --port 8000"
-    "portal|$ROOT_DIR/portal|PORTAL_DEV_PORT=${PORTAL_DEV_PORT:-5172} PORTAL_BACKEND_PORT=${PORTAL_BACKEND_PORT:-8000} PORTAL_TRADING_PORT=${PORTAL_TRADING_PORT:-5173} PORTAL_NOTES_PORT=${PORTAL_NOTES_PORT:-5174} PORTAL_MONITOR_PORT=${PORTAL_MONITOR_PORT:-5175} $PYTHON_CMD dev_server.py"
+    "portal|$ROOT_DIR/portal|PORTAL_DEV_PORT=${PORTAL_DEV_PORT:-5172} PORTAL_BACKEND_PORT=${PORTAL_BACKEND_PORT:-8000} PORTAL_TRADING_PORT=${PORTAL_TRADING_PORT:-5173} PORTAL_NOTES_PORT=${PORTAL_NOTES_PORT:-5174} PORTAL_MONITOR_PORT=${PORTAL_MONITOR_PORT:-5175} PORTAL_LEDGER_PORT=${PORTAL_LEDGER_PORT:-5176} $PYTHON_CMD dev_server.py"
   )
 
   local dir
@@ -152,26 +152,25 @@ collect_descendant_pids() {
 }
 
 terminate_pid_tree() {
-  local root_pid="$1"
+  local root_pid="${1:-}"
   [[ -n "$root_pid" ]] || return 0
   [[ "$root_pid" =~ ^[0-9]+$ ]] || return 0
   [[ "$root_pid" -eq $$ ]] && return 0
 
-  local descendants=()
+  local descendants_raw=""
   local pid
-  while read -r pid; do
-    [[ -n "$pid" ]] || continue
-    descendants+=("$pid")
-  done < <(collect_descendant_pids "$root_pid")
+  descendants_raw="$(collect_descendant_pids "$root_pid" | tr '\n' ' ' | xargs 2>/dev/null || true)"
 
-  if [[ ${#descendants[@]} -gt 0 ]]; then
-    kill "${descendants[@]}" 2>/dev/null || true
+  if [[ -n "$descendants_raw" ]]; then
+    # shellcheck disable=SC2086
+    kill $descendants_raw 2>/dev/null || true
   fi
   kill "$root_pid" 2>/dev/null || true
   sleep 1
 
   local survivors=()
-  for pid in "${descendants[@]}" "$root_pid"; do
+  for pid in $descendants_raw "$root_pid"; do
+    [[ -n "$pid" ]] || continue
     if kill -0 "$pid" 2>/dev/null; then
       survivors+=("$pid")
     fi

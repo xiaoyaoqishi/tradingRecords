@@ -1,0 +1,28 @@
+from fastapi import APIRouter
+
+from trading import broker_service, trade_service
+
+router = APIRouter(prefix="/api", tags=["trading"])
+router.add_api_route("/trades/import-paste", trade_service.import_trades_from_paste, methods=["POST"])
+router.add_api_route("/trades/positions", trade_service.list_trade_positions, methods=["GET"])
+router.add_api_route("/trades", trade_service.list_trades, methods=["GET"])
+router.add_api_route("/trades/search-options", trade_service.list_trade_search_options, methods=["GET"])
+router.add_api_route("/trades/count", trade_service.count_trades, methods=["GET"])
+router.add_api_route("/trades/statistics", trade_service.get_statistics, methods=["GET"])
+router.add_api_route("/trades/analytics", trade_service.get_trade_analytics, methods=["GET"])
+router.add_api_route("/trades", trade_service.create_trade, methods=["POST"])
+router.add_api_route("/trades/{trade_id:int}", trade_service.get_trade, methods=["GET"])
+router.add_api_route("/trades/{trade_id:int}", trade_service.update_trade, methods=["PUT"])
+router.add_api_route("/trades/{trade_id:int}", trade_service.delete_trade, methods=["DELETE"])
+router.add_api_route("/trades/sources", trade_service.list_trade_sources, methods=["GET"])
+router.add_api_route("/trades/symbols", trade_service.list_trade_symbols, methods=["GET"])
+router.add_api_route("/trade-review-taxonomy", trade_service.get_trade_review_taxonomy, methods=["GET"])
+router.add_api_route("/trades/{trade_id:int}/review", trade_service.get_trade_review, methods=["GET"])
+router.add_api_route("/trades/{trade_id:int}/review", trade_service.upsert_trade_review, methods=["PUT"])
+router.add_api_route("/trades/{trade_id:int}/review", trade_service.delete_trade_review, methods=["DELETE"])
+router.add_api_route("/trades/{trade_id:int}/source-metadata", trade_service.get_trade_source_metadata, methods=["GET"])
+router.add_api_route("/trades/{trade_id:int}/source-metadata", trade_service.upsert_trade_source_metadata, methods=["PUT"])
+router.add_api_route("/trade-brokers", broker_service.list_trade_brokers, methods=["GET"])
+router.add_api_route("/trade-brokers", broker_service.create_trade_broker, methods=["POST"])
+router.add_api_route("/trade-brokers/{broker_id}", broker_service.update_trade_broker, methods=["PUT"])
+router.add_api_route("/trade-brokers/{broker_id}", broker_service.delete_trade_broker, methods=["DELETE"])

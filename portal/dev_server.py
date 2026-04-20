@@ -6,6 +6,7 @@ Serves static files under ./portal and proxies app paths:
 - /trading/  -> frontend vite (default 127.0.0.1:5173)
 - /notes/    -> notes vite (default 127.0.0.1:5174)
 - /monitor/  -> monitor vite (default 127.0.0.1:5175)
+- /ledger/   -> ledger vite (default 127.0.0.1:5176)
 """
 
 from __future__ import annotations
@@ -34,10 +35,11 @@ def _env_port(name: str, default: int) -> int:
 
 PORTAL_DEV_PORT = _env_port("PORTAL_DEV_PORT", 5172)
 UPSTREAMS = {
-    "/api/": ("127.0.0.1", _env_port("PORTAL_BACKEND_PORT", 8000)),
-    "/trading/": ("127.0.0.1", _env_port("PORTAL_TRADING_PORT", 5173)),
-    "/notes/": ("127.0.0.1", _env_port("PORTAL_NOTES_PORT", 5174)),
-    "/monitor/": ("127.0.0.1", _env_port("PORTAL_MONITOR_PORT", 5175)),
+    "/api/": ("localhost", _env_port("PORTAL_BACKEND_PORT", 8000)),
+    "/trading/": ("localhost", _env_port("PORTAL_TRADING_PORT", 5173)),
+    "/notes/": ("localhost", _env_port("PORTAL_NOTES_PORT", 5174)),
+    "/monitor/": ("localhost", _env_port("PORTAL_MONITOR_PORT", 5175)),
+    "/ledger/": ("localhost", _env_port("PORTAL_LEDGER_PORT", 5176)),
 }
 
 HOP_BY_HOP_HEADERS = {
@@ -177,7 +179,8 @@ def main():
     print(
         f"[portal-dev] listening on http://127.0.0.1:{PORTAL_DEV_PORT} "
         f"(api={UPSTREAMS['/api/'][1]}, trading={UPSTREAMS['/trading/'][1]}, "
-        f"notes={UPSTREAMS['/notes/'][1]}, monitor={UPSTREAMS['/monitor/'][1]})"
+        f"notes={UPSTREAMS['/notes/'][1]}, monitor={UPSTREAMS['/monitor/'][1]}, "
+        f"ledger={UPSTREAMS['/ledger/'][1]})"
     )
     try:
         server.serve_forever()

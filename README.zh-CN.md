@@ -20,6 +20,7 @@ Trading Records Workspace
 - `frontend`：交易前端（记录、分析、复盘会话、交易计划、知识库、券商维护）。
 - `frontend-notes`：笔记前端（日记/文档、富文本编辑、Wiki 链接、回收站、待办）。
 - `frontend-monitor`：网站监控前端（服务器监控、站点可用性巡检、用户管理、浏览记录）。
+- `frontend-ledger`：独立记账前端（Dashboard、流水、账户、分类），部署子路径 `/ledger/`。
 - `portal`：门户首页与登录页。
 - `deploy`：生产脚本（`setup.sh`、`update.sh`）、Nginx 配置、systemd 服务文件。
 - `dev.sh`：本地联调统一编排脚本。
@@ -36,12 +37,14 @@ Trading Records Workspace
 - 复盘会话（`/api/review-sessions`）作为一等对象，支持关联交易和按筛选条件生成样本。
 - 交易计划（`/api/trade-plans`）及状态流转校验，可关联交易与复盘会话。
 - 知识库（`/api/knowledge-items`），支持分类/标签/状态筛选。
+- 记账后端域（`/api/ledger/*`）：账户/分类管理、流水增删改查与筛选、dashboard 汇总、CSV 导入、自动分类规则能力。
 - 信息维护/复盘会话工作台左侧改为文件夹分组视图，支持单分类展开与紧凑条目展示。
 - 交易/复盘/计划/信息维护工作台在桌面端（`xl`）进一步缩窄左侧分组栏，主编辑区可用宽度更大。
 - 界面可读性增强：在保持非白背景的前提下整体提亮，并强化关键字段视觉层级（统计标题、表单标签、下拉项、功能按钮、工作台标题、交易详情关键信息）。
 - 门户首页可读性优化：增加全局轻薄白色遮罩、统一文字柔和提亮阴影、“每日一诗”改为传统竖排并移除白色模糊底，同时增强底部导航副标题对比度与字号。
 - 每日诗词排版细化：按传统从右向左改为“标题列（右）- 正文列（中）- 落款列（左）”，将出处作者移至最左侧作为落款，并提升正文 `letter-spacing`/`line-height` 以增强长短句呼吸感。
 - 交易前端默认落地页调整为首页仪表盘（`/trading/` 默认跳转 `/trading/dashboard`），不再默认进入交易记录列表。
+- 门户首页提供四个工作台入口：交易、笔记、监控、账务管理（跳转 `/ledger/`）。
 - 门户首页“每日一诗”的展开/收起改为小图标按钮，放在“换一首”下方并保持同列竖排交互。
 - 文件夹内支持“优先级优先 + 维护时间”排序（同优先级按维护时间更早优先）。
 - 交易模块回收站：成交记录、知识、券商、复盘会话、交易计划支持删除后恢复（`/api/recycle/*`）。
@@ -76,6 +79,7 @@ Trading Records Workspace
   - `/trading/` -> `frontend/dist`
   - `/notes/` -> `frontend-notes/dist`
   - `/monitor/` -> `frontend-monitor/dist`
+  - `/ledger/` -> `frontend-ledger/dist`
   - `/api/*` -> FastAPI（`127.0.0.1:8000`）
 - FastAPI 负责业务接口、上传、鉴权、诗词、监控、用户管理与审计日志接口。
 - 鉴权策略：
@@ -92,11 +96,60 @@ Trading Records Workspace
 .
 ├─ backend/
 │  ├─ main.py
+│  ├─ app.py
 │  ├─ auth.py
-│  ├─ database.py
-│  ├─ models.py
-│  ├─ schemas.py
 │  ├─ trade_review_taxonomy.py
+│  ├─ core/
+│  │  ├─ config.py
+│  │  ├─ context.py
+│  │  ├─ db.py
+│  │  ├─ deps.py
+│  │  ├─ errors.py
+│  │  ├─ logging.py
+│  │  ├─ middleware.py
+│  │  └─ security.py
+│  ├─ routers/
+│  │  ├─ auth.py
+│  │  ├─ admin.py
+│  │  ├─ trading.py
+│  │  ├─ review.py
+│  │  ├─ review_sessions.py
+│  │  ├─ trade_plans.py
+│  │  ├─ knowledge.py
+│  │  ├─ notes.py
+│  │  ├─ notebook.py
+│  │  ├─ todo.py
+│  │  ├─ monitor.py
+│  │  ├─ recycle.py
+│  │  ├─ upload.py
+│  │  ├─ poem.py
+│  │  ├─ audit.py
+│  │  └─ health.py
+│  ├─ services/
+│  │  ├─ auth_service.py
+│  │  ├─ admin_service.py
+│  │  ├─ monitor_service.py
+│  │  ├─ recycle_service.py
+│  │  ├─ upload_service.py
+│  │  ├─ poem_service.py
+│  │  ├─ audit_service.py
+│  │  └─ notes_service.py
+│  ├─ models/
+│  │  ├─ trading.py
+│  │  ├─ review.py
+│  │  ├─ knowledge.py
+│  │  ├─ notes.py
+│  │  ├─ auth.py
+│  │  ├─ audit.py
+│  │  └─ monitor.py
+│  ├─ schemas/
+│  │  ├─ trading.py
+│  │  ├─ review.py
+│  │  ├─ knowledge.py
+│  │  ├─ notes.py
+│  │  ├─ auth.py
+│  │  ├─ admin.py
+│  │  └─ monitor.py
 │  ├─ trading/
 │  │  ├─ analytics_service.py
 │  │  ├─ import_service.py
@@ -105,7 +158,10 @@ Trading Records Workspace
 │  │  ├─ review_session_service.py
 │  │  ├─ source_service.py
 │  │  ├─ tag_service.py
-│  │  └─ trade_plan_service.py
+│  │  ├─ trade_plan_service.py
+│  │  ├─ trade_service.py
+│  │  ├─ broker_service.py
+│  │  └─ maintenance_service.py
 │  ├─ tests/
 │  │  ├─ conftest.py
 │  │  └─ test_*.py
@@ -136,6 +192,16 @@ Trading Records Workspace
 │  │  ├─ api.js
 │  │  ├─ App.jsx
 │  │  └─ main.jsx
+│  ├─ index.html
+│  ├─ vite.config.js
+│  └─ package.json
+├─ frontend-ledger/
+│  ├─ src/
+│  │  ├─ api/
+│  │  ├─ components/
+│  │  ├─ hooks/
+│  │  ├─ pages/
+│  │  └─ utils/
 │  ├─ index.html
 │  ├─ vite.config.js
 │  └─ package.json
@@ -193,6 +259,10 @@ npm install
 # monitor frontend
 cd ../frontend-monitor
 npm install
+
+# ledger frontend
+cd ../frontend-ledger
+npm install
 ```
 
 ## 11. 环境变量
@@ -220,9 +290,9 @@ npm install
 - `./dev.sh down`：默认会自动全量清理 `.dev-run` 下全部 `pid/log` 文件（含历史/手工日志）。
 - `DEV_CLEAN_ON_DOWN=0 ./dev.sh down`：停止服务时保留 `.dev-run` 下全部 `pid/log` 文件。
 - `PORTAL_DEV_PORT=5172 ./dev.sh up`：覆盖 portal 本地入口端口。
-- `PORTAL_BACKEND_PORT=8000 PORTAL_TRADING_PORT=5173 PORTAL_NOTES_PORT=5174 PORTAL_MONITOR_PORT=5175 ./dev.sh up`：覆盖 portal 反向代理上游端口。
+- `PORTAL_BACKEND_PORT=8000 PORTAL_TRADING_PORT=5173 PORTAL_NOTES_PORT=5174 PORTAL_MONITOR_PORT=5175 PORTAL_LEDGER_PORT=5176 ./dev.sh up`：覆盖 portal 反向代理上游端口。
 
-前端子应用（如 `frontend`、`frontend-notes`、`frontend-monitor`）：
+前端子应用（如 `frontend`、`frontend-notes`、`frontend-monitor`、`frontend-ledger`）：
 - `npm run dev`
 - `npm run build`
 - `npm run preview`
@@ -251,6 +321,7 @@ pytest -q backend/tests
 cd frontend && npm run build
 cd ../frontend-notes && npm run build
 cd ../frontend-monitor && npm run build
+cd ../frontend-ledger && npm run build
 ```
 
 后端以 Uvicorn 直接运行，本仓库没有单独打包步骤。
@@ -258,8 +329,8 @@ cd ../frontend-monitor && npm run build
 ## 15. 部署说明
 当前部署资源面向 Linux，默认路径 `/opt/tradingRecords`：
 - `deploy/trading.service` 在 `/opt/tradingRecords/backend` 启动 `python3 -m uvicorn main:app --host 127.0.0.1 --port 8000`。
-- `deploy/nginx.conf` 暴露门户和三个前端子路径，并将 `/api/` 反向代理到后端。
-- `deploy/update.sh` 会执行 `git pull`、安装后端依赖、构建三套前端、同步门户页面、重启 `nginx` 与 `trading` 服务。
+- `deploy/nginx.conf` 暴露门户和四个前端子路径（含 `/ledger/`），并将 `/api/` 反向代理到后端。
+- `deploy/update.sh` 会执行 `git pull`、安装后端依赖、构建全部前端（含 `frontend-ledger`）、同步门户页面、重启 `nginx` 与 `trading` 服务。
 - 若通过非 root 用户（如 `admin`）触发，`deploy/update.sh` 会在特权步骤（`nginx`/`systemctl`）自动走 `sudo`，因此该用户需具备相应 sudo 权限。
 - 本地一条命令触发远端更新（无需先登录服务器）：
   - `PROD_HOST=<服务器IP> PROD_USER=admin bash deploy/remote-update.sh`
@@ -300,10 +371,25 @@ cd ../frontend-monitor && npm run build
   - `GET /api/audit/logs`（仅管理员；支持 `page/size/username/module/event_type/keyword/date_from/date_to`）
   - `DELETE /api/audit/logs/{id}`（仅管理员）
 - 笔记编辑器与交易研究面板图片都通过 `/api/upload` 上传。
+- 记账接口：
+  - `GET/POST /api/ledger/accounts`、`PUT/DELETE /api/ledger/accounts/{id}`
+  - `GET/POST /api/ledger/categories`、`PUT/DELETE /api/ledger/categories/{id}`
+  - `GET/POST /api/ledger/transactions`、`GET/PUT/DELETE /api/ledger/transactions/{id}`
+  - `GET /api/ledger/dashboard`
+  - `POST /api/ledger/import/preview`、`POST /api/ledger/import/commit`
+  - `GET/POST /api/ledger/import/templates`、`DELETE /api/ledger/import/templates/{template_id}`
+  - `GET/POST /api/ledger/rules`、`PUT/DELETE /api/ledger/rules/{rule_id}`
+  - `POST /api/ledger/rules/preview`、`POST /api/ledger/rules/reapply`
 - 交易模块回收站接口：
   - `GET /api/recycle/{trades|knowledge-items|trade-brokers|review-sessions|trade-plans}`
   - `POST /api/recycle/<resource>/{id}/restore`
   - `DELETE /api/recycle/<resource>/{id}/purge`
+- 记账前端路由（`/ledger/` 基路径）：
+  - `/ledger/` 会重定向到 `/ledger/dashboard`
+  - `/ledger/dashboard`、`/ledger/transactions`、`/ledger/import`、`/ledger/rules`、`/ledger/accounts`、`/ledger/categories`
+- 记账 smoke 验证资料：
+  - 验收清单：`docs/ledger-smoke-checklist.md`
+  - 脚本：`scripts/ledger-smoke.sh`（可通过 `BASE_URL` 做在线检查）
 - `AGENTS.md` 协作约定要求：
   - 本地调试统一使用 `./dev.sh`。
   - 生产更新统一使用 `deploy/update.sh`。

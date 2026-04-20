@@ -1,8 +1,8 @@
 from typing import Any, Dict, List
 
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from core.errors import AppError
 from models import Review, ReviewTradeLink, Trade, TradeReview, TradeSourceMetadata
 from trading.source_service import resolve_trade_source_fields
 
@@ -131,7 +131,7 @@ def sync_review_trade_links(db: Session, review: Review, links: List[Dict[str, A
     }
     missing = [str(tid) for tid in requested_trade_ids if tid not in existing_trade_ids]
     if missing:
-        raise HTTPException(400, f"trade_id 不存在: {', '.join(missing)}")
+        raise AppError("invalid_trade_id", f"trade_id 不存在: {', '.join(missing)}", status_code=400)
 
     for item in final_links:
         db.add(

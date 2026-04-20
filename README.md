@@ -20,6 +20,7 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 - `frontend`: Trading app (records, analytics, review sessions, trade plans, knowledge items, broker maintenance).
 - `frontend-notes`: Notes app (diary/doc notes, rich-text editor, wiki links, recycle bin, to-do).
 - `frontend-monitor`: Website monitoring app (server monitor, site availability checks, user admin, audit logs).
+- `frontend-ledger`: Standalone ledger app (dashboard, transactions, accounts, categories), served under `/ledger/`.
 - `portal`: Static homepage and login page.
 - `deploy`: Production scripts (`setup.sh`, `update.sh`), `nginx` config, `systemd` service.
 - `dev.sh`: Unified local development orchestration script.
@@ -36,12 +37,14 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 - Review sessions as first-class objects (`/api/review-sessions`) with linked trades and filtered-slice generation.
 - Trade plans (`/api/trade-plans`) with enforced status transitions and links to trades/review sessions.
 - Knowledge base (`/api/knowledge-items`) with category/tag/status filtering and multi-doc note links.
+- Ledger backend domain (`/api/ledger/*`) with accounts, categories, transaction CRUD/filtering, dashboard aggregation, CSV import, and auto-classification rules.
 - Knowledge/review workspaces use folder-style grouped sidebars with single-expand behavior and compact item cards.
 - Trading / review / plan / maintenance workspaces now use a narrower grouped left panel (desktop `xl`), with more room for the main editor/content area.
 - UI readability pass: lighter non-white workspace background and stronger visual emphasis for key fields (stat titles, labels, dropdowns, action buttons, workspace headers, and trade-detail metadata sections).
 - Portal homepage readability pass: added a global ultra-light white overlay, softened text lift shadows, switched the daily poem section to traditional vertical layout, removed the poem blur card, and improved bottom nav subtitle contrast/size.
 - Daily poem typography refinement: reorganized into right-to-left vertical columns (title/right, poem/body, inscription/left), moved attribution to the left as a signature line, and increased body spacing (`letter-spacing`/`line-height`) for calmer long-short sentence rhythm.
 - Trading app default landing route now opens dashboard (`/trading/` -> `/trading/dashboard`) instead of trade list.
+- Portal homepage provides four workspace entries: Trading, Notes, Monitor, and Finance Workspace (`账务管理` -> `/ledger/`).
 - Daily poem expand/collapse is now a compact icon button under the refresh icon, aligned in the same vertical control column.
 - Sidebar ordering supports priority-first + maintenance-time ordering (same priority sorted by earlier update time first).
 - Trading recycle bin for five domains: trades, knowledge items, brokers, review sessions, trade plans (`/api/recycle/*` restore/purge endpoints).
@@ -76,6 +79,7 @@ The backend uses SQLite and stores runtime data under `backend/data`.
   - `/trading/` -> `frontend/dist`
   - `/notes/` -> `frontend-notes/dist`
   - `/monitor/` -> `frontend-monitor/dist`
+  - `/ledger/` -> `frontend-ledger/dist`
   - `/api/*` -> FastAPI (`127.0.0.1:8000`)
 - FastAPI serves domain APIs, uploads, auth, poem, monitor data, and audit/user-admin endpoints.
 - Authentication:
@@ -92,11 +96,60 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 .
 ├─ backend/
 │  ├─ main.py
+│  ├─ app.py
 │  ├─ auth.py
-│  ├─ database.py
-│  ├─ models.py
-│  ├─ schemas.py
 │  ├─ trade_review_taxonomy.py
+│  ├─ core/
+│  │  ├─ config.py
+│  │  ├─ context.py
+│  │  ├─ db.py
+│  │  ├─ deps.py
+│  │  ├─ errors.py
+│  │  ├─ logging.py
+│  │  ├─ middleware.py
+│  │  └─ security.py
+│  ├─ routers/
+│  │  ├─ auth.py
+│  │  ├─ admin.py
+│  │  ├─ trading.py
+│  │  ├─ review.py
+│  │  ├─ review_sessions.py
+│  │  ├─ trade_plans.py
+│  │  ├─ knowledge.py
+│  │  ├─ notes.py
+│  │  ├─ notebook.py
+│  │  ├─ todo.py
+│  │  ├─ monitor.py
+│  │  ├─ recycle.py
+│  │  ├─ upload.py
+│  │  ├─ poem.py
+│  │  ├─ audit.py
+│  │  └─ health.py
+│  ├─ services/
+│  │  ├─ auth_service.py
+│  │  ├─ admin_service.py
+│  │  ├─ monitor_service.py
+│  │  ├─ recycle_service.py
+│  │  ├─ upload_service.py
+│  │  ├─ poem_service.py
+│  │  ├─ audit_service.py
+│  │  └─ notes_service.py
+│  ├─ models/
+│  │  ├─ trading.py
+│  │  ├─ review.py
+│  │  ├─ knowledge.py
+│  │  ├─ notes.py
+│  │  ├─ auth.py
+│  │  ├─ audit.py
+│  │  └─ monitor.py
+│  ├─ schemas/
+│  │  ├─ trading.py
+│  │  ├─ review.py
+│  │  ├─ knowledge.py
+│  │  ├─ notes.py
+│  │  ├─ auth.py
+│  │  ├─ admin.py
+│  │  └─ monitor.py
 │  ├─ trading/
 │  │  ├─ analytics_service.py
 │  │  ├─ import_service.py
@@ -105,7 +158,10 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 │  │  ├─ review_session_service.py
 │  │  ├─ source_service.py
 │  │  ├─ tag_service.py
-│  │  └─ trade_plan_service.py
+│  │  ├─ trade_plan_service.py
+│  │  ├─ trade_service.py
+│  │  ├─ broker_service.py
+│  │  └─ maintenance_service.py
 │  ├─ tests/
 │  │  ├─ conftest.py
 │  │  └─ test_*.py
@@ -136,6 +192,16 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 │  │  ├─ api.js
 │  │  ├─ App.jsx
 │  │  └─ main.jsx
+│  ├─ index.html
+│  ├─ vite.config.js
+│  └─ package.json
+├─ frontend-ledger/
+│  ├─ src/
+│  │  ├─ api/
+│  │  ├─ components/
+│  │  ├─ hooks/
+│  │  ├─ pages/
+│  │  └─ utils/
 │  ├─ index.html
 │  ├─ vite.config.js
 │  └─ package.json
@@ -193,6 +259,10 @@ npm install
 # monitor frontend
 cd ../frontend-monitor
 npm install
+
+# ledger frontend
+cd ../frontend-ledger
+npm install
 ```
 
 ## 11. Environment Variables
@@ -221,9 +291,9 @@ Repository-level:
 - `./dev.sh down`: auto-cleans all `.dev-run` pid/log files by default (including legacy/manual logs).
 - `DEV_CLEAN_ON_DOWN=0 ./dev.sh down`: keep all `.dev-run` pid/log files when stopping services.
 - `PORTAL_DEV_PORT=5172 ./dev.sh up`: override portal local entry port.
-- `PORTAL_BACKEND_PORT=8000 PORTAL_TRADING_PORT=5173 PORTAL_NOTES_PORT=5174 PORTAL_MONITOR_PORT=5175 ./dev.sh up`: override portal upstream ports.
+- `PORTAL_BACKEND_PORT=8000 PORTAL_TRADING_PORT=5173 PORTAL_NOTES_PORT=5174 PORTAL_MONITOR_PORT=5175 PORTAL_LEDGER_PORT=5176 ./dev.sh up`: override portal upstream ports.
 
-Frontend modules (for example `frontend`, `frontend-notes`, `frontend-monitor`):
+Frontend modules (for example `frontend`, `frontend-notes`, `frontend-monitor`, `frontend-ledger`):
 - `npm run dev`
 - `npm run build`
 - `npm run preview`
@@ -252,6 +322,7 @@ Manual build sequence:
 cd frontend && npm run build
 cd ../frontend-notes && npm run build
 cd ../frontend-monitor && npm run build
+cd ../frontend-ledger && npm run build
 ```
 
 Backend runs with Uvicorn (no wheel/package build step in this repository).
@@ -259,8 +330,8 @@ Backend runs with Uvicorn (no wheel/package build step in this repository).
 ## 15. Deployment Notes
 Current deployment assets are Linux-oriented and expect `/opt/tradingRecords`:
 - `deploy/trading.service` runs `python3 -m uvicorn main:app --host 127.0.0.1 --port 8000` in `/opt/tradingRecords/backend`.
-- `deploy/nginx.conf` exposes portal/apps under `/`, `/trading/`, `/notes/`, `/monitor/`, and proxies `/api/`.
-- `deploy/update.sh` performs `git pull`, installs backend deps, builds all frontends, updates portal files, and restarts `nginx` + `trading` service.
+- `deploy/nginx.conf` exposes portal/apps under `/`, `/trading/`, `/notes/`, `/monitor/`, `/ledger/`, and proxies `/api/`.
+- `deploy/update.sh` performs `git pull`, installs backend deps, builds all frontends (including `frontend-ledger`), updates portal files, and restarts `nginx` + `trading` service.
 - When triggered by non-root users (for example `admin`), `deploy/update.sh` uses `sudo` for privileged steps (`nginx`/`systemctl`), so that user must have corresponding sudo permissions.
 - Local one-command trigger (without manually logging into server):
   - `PROD_HOST=<server_ip> PROD_USER=admin bash deploy/remote-update.sh`
@@ -301,6 +372,15 @@ Frontend monitor app (`frontend-monitor`) polls these endpoints and renders dash
   - `GET /api/audit/logs` (admin-only; supports `page/size/username/module/event_type/keyword/date_from/date_to`)
   - `DELETE /api/audit/logs/{id}` (admin-only)
 - Notes module and trading research panels upload images through `/api/upload`.
+- Ledger APIs:
+  - `GET/POST /api/ledger/accounts`, `PUT/DELETE /api/ledger/accounts/{id}`
+  - `GET/POST /api/ledger/categories`, `PUT/DELETE /api/ledger/categories/{id}`
+  - `GET/POST /api/ledger/transactions`, `GET/PUT/DELETE /api/ledger/transactions/{id}`
+  - `GET /api/ledger/dashboard`
+  - `POST /api/ledger/import/preview`, `POST /api/ledger/import/commit`
+  - `GET/POST /api/ledger/import/templates`, `DELETE /api/ledger/import/templates/{template_id}`
+  - `GET/POST /api/ledger/rules`, `PUT/DELETE /api/ledger/rules/{rule_id}`
+  - `POST /api/ledger/rules/preview`, `POST /api/ledger/rules/reapply`
 - Knowledge item API fields:
   - `POST/PUT /api/knowledge-items`: optional `related_note_ids: number[]` for linked doc notes (`note_type=doc` only).
   - `GET /api/knowledge-items*`: returns `related_notes` (`id`, `title`, `note_type`, `updated_at`, `notebook_id`) for each item.
@@ -312,6 +392,12 @@ Frontend monitor app (`frontend-monitor`) polls these endpoints and renders dash
   - `tab=doc|diary`
   - `noteId=<number>`
   - `anchor=<optional>`
+- Ledger frontend routes (`/ledger/` base):
+  - `/ledger/` redirects to `/ledger/dashboard`
+  - `/ledger/dashboard`, `/ledger/transactions`, `/ledger/import`, `/ledger/rules`, `/ledger/accounts`, `/ledger/categories`
+- Ledger smoke validation assets:
+  - Checklist: `docs/ledger-smoke-checklist.md`
+  - Script: `scripts/ledger-smoke.sh` (set `BASE_URL` to run online checks)
 - The repository collaboration convention in `AGENTS.md` requires:
   - Use `./dev.sh` for local debug flow.
   - Use `deploy/update.sh` for production update flow.

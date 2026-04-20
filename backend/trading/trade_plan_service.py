@@ -1,9 +1,9 @@
 from typing import Any, Dict, List
 
-from fastapi import HTTPException
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from core.errors import AppError
 from models import (
     ReviewSession,
     Trade,
@@ -40,7 +40,7 @@ TRADE_PLAN_TRANSITIONS = {
 def normalize_trade_plan_status(value: Any) -> str:
     status = str(value or "draft").strip() or "draft"
     if status not in TRADE_PLAN_STATUS_VALUES:
-        raise HTTPException(400, f"invalid trade plan status: {status}")
+        raise AppError("invalid_trade_plan_status", f"invalid trade plan status: {status}", status_code=400)
     return status
 
 
@@ -50,7 +50,7 @@ def assert_trade_plan_status_transition(current_status: str, next_status: str) -
     if current == target:
         return
     if target not in TRADE_PLAN_TRANSITIONS.get(current, set()):
-        raise HTTPException(400, f"invalid status transition: {current} -> {target}")
+        raise AppError("invalid_trade_plan_transition", f"invalid status transition: {current} -> {target}", status_code=400)
 
 
 def attach_trade_plan_link_fields(db: Session, rows: List[TradePlan]) -> List[TradePlan]:
@@ -187,7 +187,7 @@ def sync_trade_plan_trade_links(db: Session, trade_plan: TradePlan, links: List[
     }
     missing = [str(tid) for tid in requested_trade_ids if tid not in existing_trade_ids]
     if missing:
-        raise HTTPException(400, f"trade_id not found: {', '.join(missing)}")
+        raise AppError("invalid_trade_id", f"trade_id not found: {', '.join(missing)}", status_code=400)
 
     for item in final_links:
         db.add(
@@ -230,7 +230,7 @@ def sync_trade_plan_review_session_links(db: Session, trade_plan: TradePlan, lin
     }
     missing = [str(tid) for tid in requested_ids if tid not in existing_ids]
     if missing:
-        raise HTTPException(400, f"review_session_id not found: {', '.join(missing)}")
+        raise AppError("invalid_review_session_id", f"review_session_id not found: {', '.join(missing)}", status_code=400)
 
     for item in final_links:
         db.add(
