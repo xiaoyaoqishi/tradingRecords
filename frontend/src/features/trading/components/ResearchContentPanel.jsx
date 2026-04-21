@@ -184,10 +184,19 @@ function extractImageUrls(raw) {
 }
 
 function normalizeImage(item, idx) {
+  const normalizeUrl = (raw) => {
+    const text = String(raw || '').trim();
+    if (!text) return '';
+    if (/^(data:|blob:|https?:\/\/|\/\/)/i.test(text)) return text;
+    if (text.startsWith('/api/uploads/')) return text;
+    if (text.startsWith('/uploads/')) return `/api${text}`;
+    if (text.startsWith('uploads/')) return `/api/${text}`;
+    return text;
+  };
   const width = Number(item?.width);
   return {
     id: String(item?.id || `${Date.now()}-${idx}`),
-    url: String(item?.url || '').trim(),
+    url: normalizeUrl(item?.url),
     width: Number.isFinite(width) ? Math.max(120, Math.min(1200, Math.round(width))) : 120,
     caption: String(item?.caption || '').trim(),
   };
@@ -268,12 +277,16 @@ export default function ResearchContentPanel({
   const [editorSeed, setEditorSeed] = useState(0);
   const [editorInitialHtml, setEditorInitialHtml] = useState('');
 
-  useEffect(() => {
-    if (!modalOpen) return;
+  const syncEditorHtml = () => {
     const editor = editorRef.current;
     if (!editor) return;
     editor.innerHTML = editorInitialHtml;
     editorBodyRef.current = editor.innerHTML;
+  };
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    syncEditorHtml();
   }, [modalOpen, editorSeed, editorInitialHtml]);
   const openModal = () => {
     const latest = parseResearchValue(value);
@@ -488,6 +501,9 @@ export default function ResearchContentPanel({
         centered
         width={920}
         open={modalOpen}
+        afterOpenChange={(open) => {
+          if (open) syncEditorHtml();
+        }}
         onCancel={() => setModalOpen(false)}
         onOk={saveModal}
         okText="应用内容"
