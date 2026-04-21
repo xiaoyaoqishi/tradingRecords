@@ -429,19 +429,19 @@
   </div>
 
   <div class="nav-row">
-    <a class="nav-item" href="/trading/">
+    <a class="nav-item" href="/trading/" id="tradingNavItem">
       <div class="seal">易</div>
       <div class="name">交易记录</div>
       <div class="desc">交易流水 · 统计分析 · 复盘改进</div>
     </a>
     <div class="nav-separator"></div>
-    <a class="nav-item" href="/notes/">
+    <a class="nav-item" href="/notes/" id="notesNavItem">
       <div class="seal">笔</div>
       <div class="name">知识笔记</div>
       <div class="desc">日记文档 · 待办管理 · 回收站</div>
     </a>
     <div class="nav-separator"></div>
-    <a class="nav-item" href="/ledger/">
+    <a class="nav-item" href="/ledger/" id="ledgerNavItem">
       <div class="seal">账</div>
       <div class="name">账务管理</div>
       <div class="desc">账户分类 · 流水管理 · 收支汇总</div>
@@ -480,6 +480,49 @@
     { text: '钟山风雨起苍黄，百万雄师过大江。\n虎踞龙盘今胜昔，天翻地覆慨而慷。\n宜将剩勇追穷寇，不可沽名学霸王。\n天若有情天亦老，人间正道是沧桑。', title: '七律·人民解放军占领南京', author: '毛泽东' }
   ];
 
+  function applyModuleVisibility(checkData) {
+    const modulePermissions = Array.isArray(checkData?.module_permissions) ? checkData.module_permissions : [];
+    const moduleSet = new Set(modulePermissions);
+    const moduleNavMap = {
+      trading: document.getElementById('tradingNavItem'),
+      notes: document.getElementById('notesNavItem'),
+      ledger: document.getElementById('ledgerNavItem'),
+    };
+
+    Object.entries(moduleNavMap).forEach(([moduleKey, el]) => {
+      if (!el) return;
+      if (checkData?.is_admin || moduleSet.has(moduleKey)) {
+        el.style.display = '';
+      } else {
+        el.style.display = 'none';
+      }
+    });
+
+    const monitorNav = document.getElementById('monitorNavItem');
+    if (monitorNav && !checkData?.is_admin) {
+      monitorNav.style.display = 'none';
+    }
+
+    const navRow = document.querySelector('.nav-row');
+    if (!navRow) return;
+    const children = Array.from(navRow.children);
+    children.forEach((node) => {
+      if (node.classList.contains('nav-separator')) node.style.display = 'none';
+    });
+    const visibleNavItems = children.filter((node) => node.classList.contains('nav-item') && node.style.display !== 'none');
+    visibleNavItems.forEach((item, idx) => {
+      if (idx === 0) return;
+      let prev = item.previousElementSibling;
+      while (prev) {
+        if (prev.classList.contains('nav-separator')) {
+          prev.style.display = '';
+          break;
+        }
+        prev = prev.previousElementSibling;
+      }
+    });
+  }
+
   (async () => {
     try {
       const res = await fetch('/api/auth/check');
@@ -489,12 +532,7 @@
         return;
       }
       document.body.classList.remove('auth-pending');
-      if (!data.is_admin) {
-        const monitorNav = document.getElementById('monitorNavItem');
-        if (monitorNav) {
-          monitorNav.style.display = 'none';
-        }
-      }
+      applyModuleVisibility(data);
       fetch('/api/audit/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -46,6 +46,7 @@ The backend uses SQLite and stores runtime data under `backend/data`.
 - Daily poem typography refinement: reorganized into right-to-left vertical columns (title/right, poem/body, inscription/left), moved attribution to the left as a signature line, and increased body spacing (`letter-spacing`/`line-height`) for calmer long-short sentence rhythm.
 - Trading app default landing route now opens dashboard (`/trading/` -> `/trading/dashboard`) instead of trade list.
 - Portal homepage provides four workspace entries: Trading, Notes, Monitor, and Finance Workspace (`账务管理` -> `/ledger/`).
+- Portal homepage now hides module entries (`trading/notes/ledger`) automatically based on `module_permissions`; monitor entry remains admin-only.
 - Daily poem expand/collapse is now a compact icon button under the refresh icon, aligned in the same vertical control column.
 - Sidebar ordering supports priority-first + maintenance-time ordering (same priority sorted by earlier update time first).
 - Trading recycle bin for five domains: trades, knowledge items, brokers, review sessions, trade plans (`/api/recycle/*` restore/purge endpoints).
