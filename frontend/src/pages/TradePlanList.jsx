@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { Button, Col, DatePicker, Descriptions, Empty, FloatButton, Form, Input, List, Popconfirm, Row, Select, Space, Tag, Typography, message } from 'antd';
+import { Button, Col, DatePicker, Descriptions, Drawer, Empty, FloatButton, Form, Input, List, Popconfirm, Popover, Row, Select, Slider, Space, Tag, Typography, message } from 'antd';
 import InkSection from '../components/InkSection';
 import dayjs from 'dayjs';
 import { reviewSessionApi, tradeApi, tradePlanApi } from '../api';
@@ -7,6 +7,7 @@ import ReadEditActions from '../features/trading/components/ReadEditActions';
 import ResearchContentPanel from '../features/trading/components/ResearchContentPanel';
 import { buildTradeSearchOption, formatInstrumentDisplay, normalizeTagList } from '../features/trading/display';
 import { MenuFoldOutlined, MenuUnfoldOutlined, ReadOutlined, ShareAltOutlined } from '@ant-design/icons';
+import './ReviewList.css';
 
 const { TextArea } = Input;
 
@@ -24,9 +25,38 @@ const PRIORITY_OPTIONS = [
   { value: 'medium', label: '中' },
   { value: 'low', label: '低' },
 ];
+const PLAN_READER_FONT_STORAGE_KEY = 'trading.plan.reader_font_scale';
+const PLAN_READER_DEFAULT_SCALE = 100;
+const PLAN_READER_SCALE_MIN = 95;
+const PLAN_READER_SCALE_MAX = 135;
+const PLAN_READER_SCALE_STEP = 5;
+const LEGACY_READER_LEVEL_TO_SCALE = { xs: 85, sm: 95, md: 100, lg: 110, xl: 120 };
 
 function statusLabel(status) {
   return STATUS_OPTIONS.find((x) => x.value === status)?.label || status || '-';
+}
+
+function loadPlanReaderFontScale() {
+  if (typeof window === 'undefined') return PLAN_READER_DEFAULT_SCALE;
+  try {
+    const raw = window.localStorage.getItem(PLAN_READER_FONT_STORAGE_KEY);
+    if (!raw) return PLAN_READER_DEFAULT_SCALE;
+    if (LEGACY_READER_LEVEL_TO_SCALE[raw]) return LEGACY_READER_LEVEL_TO_SCALE[raw];
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return PLAN_READER_DEFAULT_SCALE;
+    const clamped = Math.min(PLAN_READER_SCALE_MAX, Math.max(PLAN_READER_SCALE_MIN, num));
+    return Math.round(clamped / PLAN_READER_SCALE_STEP) * PLAN_READER_SCALE_STEP;
+  } catch {
+    // ignore
+  }
+  return PLAN_READER_DEFAULT_SCALE;
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  const d = dayjs(value);
+  if (!d.isValid()) return '-';
+  return d.format('YYYY-MM-DD HH:mm');
 }
 
 function normalizePayload(v) {
@@ -64,9 +94,27 @@ export default function TradePlanList() {
   const [linkedTrades, setLinkedTrades] = useState([]);
   const [quickTradeId, setQuickTradeId] = useState(undefined);
   const [planSidebarCollapsed, setPlanSidebarCollapsed] = useState(false);
+  const [planDetailDrawerOpen, setPlanDetailDrawerOpen] = useState(false);
+  const [planFontPopoverOpen, setPlanFontPopoverOpen] = useState(false);
+  const [planReaderFontScale, setPlanReaderFontScale] = useState(loadPlanReaderFontScale);
   const [form] = Form.useForm();
 
   const selected = useMemo(() => rows.find((x) => x.id === selectedId) || null, [rows, selectedId]);
+  const selectedPlanTags = useMemo(() => normalizeTagList(selected?.tags), [selected]);
+  const planReaderStyle = useMemo(() => {
+    const scale = Number.isFinite(Number(planReaderFontScale))
+      ? Number(planReaderFontScale)
+      : PLAN_READER_DEFAULT_SCALE;
+    const ratio = scale / 100;
+    const fontSize = `${(14 * ratio).toFixed(2)}px`;
+    const lineHeight = (1.94 + (ratio - 1) * 0.4).toFixed(2);
+    const paragraphSpacing = `${(0.78 + (ratio - 1) * 0.36).toFixed(2)}em`;
+    return {
+      '--reader-font-size': fontSize,
+      '--reader-line-height': lineHeight,
+      '--reader-paragraph-spacing': paragraphSpacing,
+    };
+  }, [planReaderFontScale]);
 
   const resetForm = (row) => {
     if (!row) {
@@ -113,6 +161,16 @@ export default function TradePlanList() {
   useEffect(() => {
     loadRows();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(PLAN_READER_FONT_STORAGE_KEY, String(planReaderFontScale));
+  }, [planReaderFontScale]);
+
+  useEffect(() => {
+    setPlanDetailDrawerOpen(false);
+    setPlanFontPopoverOpen(false);
+  }, [selectedId]);
 
   const searchTradeOptions = async (keyword = '') => {
     const res = await tradeApi.searchOptions({ q: keyword, limit: 50, include_ids: linkedTrades.map((x) => x.trade_id).join(',') });
@@ -175,8 +233,8 @@ export default function TradePlanList() {
 
   return (
     <div className="review-workspace">
-      <div className="review-toolbar">
-        <div className="review-toolbar-inner">
+      <div className="review-header-card review-toolbar">
+        <div className="review-header-main">
           <div>
             <Typography.Title level={4} style={{ margin: 0 }}>交易计划工作台</Typography.Title>
             <Typography.Text type="secondary">计划是第一类对象，可关联交易并生成跟进复盘会话</Typography.Text>
@@ -188,8 +246,16 @@ export default function TradePlanList() {
             >
               {planSidebarCollapsed ? '展开侧栏' : '收起侧栏'}
             </Button>
-            <Button onClick={() => { setSelectedId(null); resetForm(null); setEditing(true); }}>新建交易计划</Button>
-            <ReadEditActions editing={editing} saving={saving} onEdit={() => { if (selected) { resetForm(selected); setEditing(true); } }} onSave={handleSave} onCancel={() => { resetForm(selected); setEditing(false); }} editDisabled={!selectedId} />
+          </Space>
+        </div>
+      </div>
+
+      <div className="review-toolbar-strip">
+        <div className="review-tool-group review-tool-group-actions">
+          <div className="review-tool-label">计划操作</div>
+          <Space wrap>
+            <Button type="primary" onClick={() => { setSelectedId(null); resetForm(null); setEditing(true); setPlanDetailDrawerOpen(false); setPlanFontPopoverOpen(false); }}>新建交易计划</Button>
+            <ReadEditActions editing={editing} saving={saving} onEdit={() => { if (selected) { resetForm(selected); setEditing(true); setPlanDetailDrawerOpen(false); setPlanFontPopoverOpen(false); } }} onSave={handleSave} onCancel={() => { resetForm(selected); setEditing(false); setPlanDetailDrawerOpen(false); setPlanFontPopoverOpen(false); }} editDisabled={!selectedId} />
             <Button onClick={createFollowupSession} disabled={!selectedId}>创建跟进复盘会话</Button>
             <Popconfirm title="确认移入回收站？" onConfirm={handleDelete} disabled={!selectedId}><Button danger disabled={!selectedId}>删除</Button></Popconfirm>
           </Space>
@@ -204,7 +270,7 @@ export default function TradePlanList() {
                 dataSource={rows}
                 locale={{ emptyText: <Empty description="暂无交易计划" /> }}
                 renderItem={(item) => (
-                  <List.Item className={`review-list-item ${item.id === selectedId ? 'active' : ''}`} onClick={() => { setSelectedId(item.id); resetForm(item); setEditing(false); }}>
+                  <List.Item className={`review-list-item ${item.id === selectedId ? 'active' : ''}`} onClick={() => { setSelectedId(item.id); resetForm(item); setEditing(false); setPlanDetailDrawerOpen(false); setPlanFontPopoverOpen(false); }}>
                     <div className="review-list-main">
                       <div className="review-list-title">{item.title || `交易计划 #${item.id}`}</div>
                       <div className="review-list-meta">
@@ -212,7 +278,7 @@ export default function TradePlanList() {
                         <Tag color="blue">{item.plan_date || '-'}</Tag>
                         <Tag color="gold">关联 {item.linked_trade_ids?.length || 0}</Tag>
                       </div>
-                      <Typography.Paragraph className="review-list-summary" ellipsis={{ rows: 2 }}>
+                      <Typography.Paragraph className="review-list-summary" ellipsis={{ rows: 1 }}>
                         {item.thesis || item.setup_type || item.market_regime || '无摘要'}
                       </Typography.Paragraph>
                     </div>
@@ -297,51 +363,132 @@ export default function TradePlanList() {
             ) : !selected ? (
               <Empty description="请选择左侧交易计划或新建" />
             ) : (
-              <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                <div className="review-group-header">
-                  <span className="review-group-name"><ReadOutlined />研究内容</span>
-                </div>
-                {selected.thesis ? (
-                  <InkSection size="small" title="交易论点">
-                    <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>{selected.thesis}</Typography.Paragraph>
-                  </InkSection>
-                ) : null}
-                {selected.post_result_summary ? (
-                  <InkSection size="small" title="结果摘要">
-                    <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>{selected.post_result_summary}</Typography.Paragraph>
-                  </InkSection>
-                ) : null}
-                <InkSection size="small" title="研究内容">
-                  <ResearchContentPanel value={selected.research_notes} title="研究内容" />
-                </InkSection>
-                <div className="review-group-header">
-                  <span className="review-group-name"><ShareAltOutlined />计划属性与关联</span>
-                </div>
-                <InkSection size="small" title="计划概览">
-                  <Descriptions size="small" column={2}>
-                    <Descriptions.Item label="标题">{selected.title || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="日期">{selected.plan_date || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="状态">{statusLabel(selected.status)}</Descriptions.Item>
-                    <Descriptions.Item label="品种">{formatInstrumentDisplay(selected.symbol, selected.contract)}</Descriptions.Item>
-                    <Descriptions.Item label="形态">{selected.setup_type || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="市场环境">{selected.market_regime || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="执行清单">{selected.execution_checklist || '-'}</Descriptions.Item>
-                  </Descriptions>
-                </InkSection>
-                <InkSection size="small" title="关联交易（内容卡片）">
-                  {(selected.trade_links || []).length === 0 ? <Empty description="暂无关联交易" image={Empty.PRESENTED_IMAGE_SIMPLE} /> : (
-                    <div className="review-linked-grid">
-                      {(selected.trade_links || []).map((item) => (
-                        <div key={`${item.id}-${item.trade_id}`} className="review-linked-card">
-                          <Typography.Text strong>{item.trade_summary?.trade_date || '-'} / {formatInstrumentDisplay(item.trade_summary?.symbol, item.trade_summary?.contract)}</Typography.Text>
-                          <br />
-                          <Typography.Text type="secondary">{item.trade_summary?.direction || '-'} / 手数 {item.trade_summary?.quantity ?? '-'} / 价格 {item.trade_summary?.open_price ?? '-'} {'->'} {item.trade_summary?.close_price ?? '-'} / PnL {item.trade_summary?.pnl ?? '-'} / 来源 {item.trade_summary?.source_display || '-'}</Typography.Text>
+              <div className="review-detail-layout">
+                <div className="review-reading-toolbar">
+                  <Typography.Text type="secondary" className="review-reading-title">
+                    {selected.title || `交易计划 #${selected.id}`}
+                  </Typography.Text>
+                  <Space size={6} className="review-reading-actions">
+                    <Popover
+                      trigger="click"
+                      placement="bottomRight"
+                      open={planFontPopoverOpen}
+                      onOpenChange={setPlanFontPopoverOpen}
+                      overlayClassName="review-font-popover"
+                      content={(
+                        <div className="review-font-panel">
+                          <div className="review-font-panel-head">
+                            <Typography.Text className="review-font-panel-title">阅读字号</Typography.Text>
+                            <Typography.Text type="secondary">{planReaderFontScale}%</Typography.Text>
+                          </div>
+                          <Slider
+                            min={PLAN_READER_SCALE_MIN}
+                            max={PLAN_READER_SCALE_MAX}
+                            step={PLAN_READER_SCALE_STEP}
+                            value={planReaderFontScale}
+                            onChange={setPlanReaderFontScale}
+                            tooltip={{ formatter: (value) => `${value}%` }}
+                          />
+                          <div className="review-font-panel-foot">
+                            <Typography.Text type="secondary">95%</Typography.Text>
+                            <Button
+                              type="text"
+                              size="small"
+                              onClick={() => setPlanReaderFontScale(PLAN_READER_DEFAULT_SCALE)}
+                            >
+                              恢复默认
+                            </Button>
+                            <Typography.Text type="secondary">135%</Typography.Text>
+                          </div>
                         </div>
-                      ))}
+                      )}
+                    >
+                      <Button size="small" className="review-font-trigger">Aa</Button>
+                    </Popover>
+                    <Button size="small" onClick={() => setPlanDetailDrawerOpen(true)}>
+                      详情
+                    </Button>
+                  </Space>
+                </div>
+
+                <div className="review-article-paper review-article-reading" style={planReaderStyle}>
+                  {selected.thesis ? (
+                    <Typography.Paragraph className="review-reader-lead">{selected.thesis}</Typography.Paragraph>
+                  ) : null}
+                  <ResearchContentPanel showStandardFields={false} value={selected.research_notes} />
+                  {selected.post_result_summary ? (
+                    <Typography.Paragraph className="review-reader-footnote">
+                      {selected.post_result_summary}
+                    </Typography.Paragraph>
+                  ) : null}
+                </div>
+
+                <Drawer
+                  title="计划详情"
+                  placement="right"
+                  width={460}
+                  onClose={() => setPlanDetailDrawerOpen(false)}
+                  open={planDetailDrawerOpen}
+                  className="review-detail-drawer"
+                >
+                  <div className="review-drawer-group">
+                    <Typography.Text className="review-drawer-group-title">基本信息</Typography.Text>
+                    <div className="review-drawer-block">
+                      <Typography.Text className="review-drawer-main-title">{selected.title || `交易计划 #${selected.id}`}</Typography.Text>
+                      <Space size={6} wrap>
+                        <Tag>{statusLabel(selected.status)}</Tag>
+                        <Tag color="blue">{selected.plan_date || '-'}</Tag>
+                        <Tag>{selected.priority || 'medium'}</Tag>
+                      </Space>
+                      <Descriptions size="small" column={1}>
+                        <Descriptions.Item label="品种">{formatInstrumentDisplay(selected.symbol, selected.contract)}</Descriptions.Item>
+                        <Descriptions.Item label="方向偏好">{selected.direction_bias || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="更新时间">{formatDateTime(selected.updated_at || selected.created_at)}</Descriptions.Item>
+                      </Descriptions>
                     </div>
-                  )}
-                </InkSection>
-              </Space>
+                  </div>
+
+                  <div className="review-drawer-group">
+                    <Typography.Text className="review-drawer-group-title">计划属性</Typography.Text>
+                    <div className="review-drawer-block">
+                      <Descriptions size="small" column={1}>
+                        <Descriptions.Item label="形态">{selected.setup_type || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="市场环境">{selected.market_regime || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="入场区">{selected.entry_zone || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="止损计划">{selected.stop_loss_plan || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="目标计划">{selected.target_plan || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="失效条件">{selected.invalid_condition || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="风险备注">{selected.risk_notes || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="执行清单">{selected.execution_checklist || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="来源引用">{selected.source_ref || '-'}</Descriptions.Item>
+                      </Descriptions>
+                      <dl className="review-meta-list">
+                        <dt><Typography.Text type="secondary">标签</Typography.Text></dt>
+                        <dd className="review-detail-tags">
+                          {selectedPlanTags.length > 0
+                            ? selectedPlanTags.map((tag) => <Tag key={tag}>{tag}</Tag>)
+                            : <Typography.Text type="secondary">-</Typography.Text>}
+                        </dd>
+                      </dl>
+                    </div>
+                  </div>
+
+                  <div className="review-drawer-group">
+                    <Typography.Text className="review-drawer-group-title">关联交易</Typography.Text>
+                    {(selected.trade_links || []).length === 0 ? <Empty description="暂无关联交易" image={Empty.PRESENTED_IMAGE_SIMPLE} /> : (
+                      <div className="review-linked-grid review-linked-grid-drawer">
+                        {(selected.trade_links || []).map((item) => (
+                          <div key={`${item.id}-${item.trade_id}`} className="review-linked-card">
+                            <Typography.Text strong>{item.trade_summary?.trade_date || '-'} / {formatInstrumentDisplay(item.trade_summary?.symbol, item.trade_summary?.contract)}</Typography.Text>
+                            <br />
+                            <Typography.Text type="secondary">{item.trade_summary?.direction || '-'} / 手数 {item.trade_summary?.quantity ?? '-'} / 价格 {item.trade_summary?.open_price ?? '-'} {'->'} {item.trade_summary?.close_price ?? '-'} / PnL {item.trade_summary?.pnl ?? '-'} / 来源 {item.trade_summary?.source_display || '-'}</Typography.Text>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </Drawer>
+              </div>
             )}
           </InkSection>
         </Col>

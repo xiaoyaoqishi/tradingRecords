@@ -5,15 +5,18 @@ import {
   Col,
   Collapse,
   DatePicker,
+  Drawer,
   Descriptions,
   Empty,
   Form,
   Input,
   List,
+  Popover,
   Popconfirm,
   Rate,
   Row,
   Select,
+  Slider,
   Space,
   Switch,
   Tag,
@@ -75,6 +78,12 @@ const TRADE_STATUS_OPTIONS = [
   { value: 'open', label: '持仓' },
   { value: 'closed', label: '已平' },
 ];
+const REVIEW_READER_FONT_STORAGE_KEY = 'trading.review.reader_font_scale';
+const REVIEW_READER_DEFAULT_SCALE = 100;
+const REVIEW_READER_SCALE_MIN = 95;
+const REVIEW_READER_SCALE_MAX = 135;
+const REVIEW_READER_SCALE_STEP = 5;
+const LEGACY_READER_LEVEL_TO_SCALE = { xs: 85, sm: 95, md: 100, lg: 110, xl: 120 };
 
 function kindLabel(kind) {
   return REVIEW_KIND_OPTIONS.find((x) => x.value === kind)?.label || kind || '-';
@@ -91,6 +100,29 @@ function selectionModeLabel(mode) {
   if (mode === 'plan_linked') return '计划关联';
   if (mode === 'imported') return '导入';
   return mode || '-';
+}
+
+function loadReviewReaderFontScale() {
+  if (typeof window === 'undefined') return REVIEW_READER_DEFAULT_SCALE;
+  try {
+    const raw = window.localStorage.getItem(REVIEW_READER_FONT_STORAGE_KEY);
+    if (!raw) return REVIEW_READER_DEFAULT_SCALE;
+    if (LEGACY_READER_LEVEL_TO_SCALE[raw]) return LEGACY_READER_LEVEL_TO_SCALE[raw];
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return REVIEW_READER_DEFAULT_SCALE;
+    const clamped = Math.min(REVIEW_READER_SCALE_MAX, Math.max(REVIEW_READER_SCALE_MIN, num));
+    return Math.round(clamped / REVIEW_READER_SCALE_STEP) * REVIEW_READER_SCALE_STEP;
+  } catch {
+    // ignore
+  }
+  return REVIEW_READER_DEFAULT_SCALE;
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  const d = dayjs(value);
+  if (!d.isValid()) return '-';
+  return d.format('YYYY-MM-DD HH:mm');
 }
 
 function normalizePayload(values) {
@@ -175,6 +207,9 @@ export default function ReviewList() {
   const [quickTradeId, setQuickTradeId] = useState(undefined);
   const [quickRole, setQuickRole] = useState('linked_trade');
   const [tradeSearch, setTradeSearch] = useState({ q: '', symbol: undefined, status: undefined, dateRange: null });
+  const [reviewDetailDrawerOpen, setReviewDetailDrawerOpen] = useState(false);
+  const [reviewFontPopoverOpen, setReviewFontPopoverOpen] = useState(false);
+  const [reviewReaderFontScale, setReviewReaderFontScale] = useState(loadReviewReaderFontScale);
   const [form] = Form.useForm();
   const tradeSearchTimerRef = useRef(null);
   const tradeSearchReqRef = useRef(0);
@@ -257,6 +292,21 @@ export default function ReviewList() {
     });
     return out;
   }, [tradeOptionsMerged]);
+
+  const reviewReaderStyle = useMemo(() => {
+    const scale = Number.isFinite(Number(reviewReaderFontScale))
+      ? Number(reviewReaderFontScale)
+      : REVIEW_READER_DEFAULT_SCALE;
+    const ratio = scale / 100;
+    const fontSize = `${(14 * ratio).toFixed(2)}px`;
+    const lineHeight = (1.94 + (ratio - 1) * 0.4).toFixed(2);
+    const paragraphSpacing = `${(0.78 + (ratio - 1) * 0.36).toFixed(2)}em`;
+    return {
+      '--reader-font-size': fontSize,
+      '--reader-line-height': lineHeight,
+      '--reader-paragraph-spacing': paragraphSpacing,
+    };
+  }, [reviewReaderFontScale]);
 
   const resetForm = (item) => {
     if (!item) {
@@ -392,9 +442,19 @@ export default function ReviewList() {
     }
   }, [rows, expandedScope]);
 
+  useEffect(() => {
+    setReviewDetailDrawerOpen(false);
+    setReviewFontPopoverOpen(false);
+  }, [selectedId]);
+
   useEffect(() => () => {
     if (tradeSearchTimerRef.current) clearTimeout(tradeSearchTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(REVIEW_READER_FONT_STORAGE_KEY, String(reviewReaderFontScale));
+  }, [reviewReaderFontScale]);
 
   useEffect(() => {
     if (!editing) return;
@@ -485,31 +545,47 @@ export default function ReviewList() {
     setSelectedId(item.id);
     resetForm(item);
     setEditing(false);
+    setReviewDetailDrawerOpen(false);
+    setReviewFontPopoverOpen(false);
   };
+  const selectedReviewTags = normalizeTagList(selected?.tags || selected?.tags_text);
   const resolveScrollTarget = () => document.querySelector('.app-content') || window;
 
   return (
     <div className="review-workspace">
-      <div className="review-toolbar">
-        <div className="review-toolbar-inner">
+      <div className="review-header-card review-toolbar">
+        <div className="review-header-main">
           <div>
             <Typography.Title level={4} style={{ margin: 0 }}>复盘研究工作台</Typography.Title>
             <Typography.Text type="secondary">ReviewSession 是分组复盘唯一主对象</Typography.Text>
           </div>
           <Space wrap>
+            <Button
+              icon={reviewSidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => setReviewSidebarCollapsed((prev) => !prev)}
+            >
+              {reviewSidebarCollapsed ? '展开目录' : '收起目录'}
+            </Button>
+          </Space>
+        </div>
+      </div>
+
+      <div className="review-toolbar-strip">
+        <div className="review-tool-group review-tool-group-filters">
+          <div className="review-tool-label">筛选</div>
+          <div className="review-tool-fields">
             <Select value={activeKind} options={REVIEW_KIND_OPTIONS} onChange={setActiveKind} style={{ width: 130 }} />
             <Select allowClear value={activeScope} options={REVIEW_SCOPE_OPTIONS} placeholder="范围" onChange={setActiveScope} style={{ width: 130 }} />
             <Select allowClear value={activeTag} options={reviewTagOptions} placeholder="标签" onChange={setActiveTag} style={{ width: 140 }} />
             <Select value={favoriteOnly ? 'fav' : 'all'} style={{ width: 110 }} onChange={(v) => setFavoriteOnly(v === 'fav')} options={[{ label: '全部', value: 'all' }, { label: '仅收藏', value: 'fav' }]} />
             <Select allowClear value={minStars} placeholder="最低星级" style={{ width: 120 }} onChange={setMinStars} options={[1, 2, 3, 4, 5].map((x) => ({ value: x, label: `${x} 星` }))} />
-            <Button
-              icon={reviewSidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setReviewSidebarCollapsed((prev) => !prev)}
-            >
-              {reviewSidebarCollapsed ? '展开侧栏' : '收起侧栏'}
-            </Button>
-            <Button onClick={() => { setSelectedId(null); resetForm(null); setEditing(true); }} icon={<PlusOutlined />}>新建会话</Button>
-            <ReadEditActions editing={editing} saving={saving} onEdit={() => { if (selected) { resetForm(selected); setEditing(true); } }} onSave={handleSave} onCancel={() => { resetForm(selected); setEditing(false); }} editDisabled={!selectedId} />
+          </div>
+        </div>
+        <div className="review-tool-group review-tool-group-actions">
+          <div className="review-tool-label">会话操作</div>
+          <Space wrap>
+            <Button type="primary" onClick={() => { setSelectedId(null); resetForm(null); setEditing(true); setReviewDetailDrawerOpen(false); setReviewFontPopoverOpen(false); }} icon={<PlusOutlined />}>新建会话</Button>
+            <ReadEditActions editing={editing} saving={saving} onEdit={() => { if (selected) { resetForm(selected); setEditing(true); setReviewDetailDrawerOpen(false); setReviewFontPopoverOpen(false); } }} onSave={handleSave} onCancel={() => { resetForm(selected); setEditing(false); setReviewDetailDrawerOpen(false); setReviewFontPopoverOpen(false); }} editDisabled={!selectedId} />
             <Popconfirm title="确认移入回收站？" onConfirm={handleDelete} disabled={!selectedId}><Button danger icon={<DeleteOutlined />} disabled={!selectedId}>删除</Button></Popconfirm>
           </Space>
         </div>
@@ -660,40 +736,147 @@ export default function ReviewList() {
             ) : !selected ? (
               <Empty description="请选择左侧会话或新建" />
             ) : (
-              <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                <div className="review-group-header">
-                  <span className="review-group-name"><ReadOutlined />研究内容</span>
+              <div className="review-detail-layout">
+                <div className="review-reading-toolbar">
+                  <Typography.Text type="secondary" className="review-reading-title">
+                    {selected.title || `Session #${selected.id}`}
+                  </Typography.Text>
+                  <Space size={6} className="review-reading-actions">
+                    <Popover
+                      trigger="click"
+                      placement="bottomRight"
+                      open={reviewFontPopoverOpen}
+                      onOpenChange={setReviewFontPopoverOpen}
+                      overlayClassName="review-font-popover"
+                      content={(
+                        <div className="review-font-panel">
+                          <div className="review-font-panel-head">
+                            <Typography.Text className="review-font-panel-title">阅读字号</Typography.Text>
+                            <Typography.Text type="secondary">{reviewReaderFontScale}%</Typography.Text>
+                          </div>
+                          <Slider
+                            min={REVIEW_READER_SCALE_MIN}
+                            max={REVIEW_READER_SCALE_MAX}
+                            step={REVIEW_READER_SCALE_STEP}
+                            value={reviewReaderFontScale}
+                            onChange={setReviewReaderFontScale}
+                            tooltip={{ formatter: (value) => `${value}%` }}
+                          />
+                          <div className="review-font-panel-foot">
+                            <Typography.Text type="secondary">95%</Typography.Text>
+                            <Button
+                              type="text"
+                              size="small"
+                              onClick={() => setReviewReaderFontScale(REVIEW_READER_DEFAULT_SCALE)}
+                            >
+                              恢复默认
+                            </Button>
+                            <Typography.Text type="secondary">135%</Typography.Text>
+                          </div>
+                        </div>
+                      )}
+                    >
+                      <Button size="small" className="review-font-trigger">Aa</Button>
+                    </Popover>
+                    <Button size="small" onClick={() => setReviewDetailDrawerOpen(true)}>
+                      详情
+                    </Button>
+                  </Space>
                 </div>
-                {selected.summary ? <InkSection size="small" title="结论摘要"><Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>{selected.summary}</Typography.Paragraph></InkSection> : null}
-                {selected.action_items ? <InkSection size="small" title="后续动作"><Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>{selected.action_items}</Typography.Paragraph></InkSection> : null}
-                {selected.content ? <InkSection size="small" title="详细文本"><Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>{selected.content}</Typography.Paragraph></InkSection> : null}
-                <InkSection size="small" title="研究内容"><ResearchContentPanel value={selected.research_notes} title="研究内容" /></InkSection>
-                <div className="review-group-header">
-                  <span className="review-group-name"><ShareAltOutlined />会话属性与关联</span>
-                </div>
-                <InkSection size="small" title="会话概览">
-                  <Descriptions size="small" column={2}>
-                    <Descriptions.Item label="标题">{selected.title || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="类型">{kindLabel(selected.review_kind)}</Descriptions.Item>
-                    <Descriptions.Item label="范围">{mapLabel(REVIEW_SCOPE_ZH, selected.review_scope || 'custom')}</Descriptions.Item>
-                    <Descriptions.Item label="选择方式">{selectionModeLabel(selected.selection_mode)}</Descriptions.Item>
-                    <Descriptions.Item label="分组依据">{selected.selection_basis || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="复盘目标">{selected.review_goal || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="市场环境">{selected.market_regime || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="星级"><Rate disabled value={selected.star_rating || 0} /></Descriptions.Item>
-                  </Descriptions>
-                </InkSection>
 
-                <InkSection size="small" title="关联交易（内容卡片）">
-                  {(selected.trade_links || []).length === 0 ? (
-                    <Empty description="暂无关联交易" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                  ) : (
-                    <div className="review-linked-grid">
-                      {(selected.trade_links || []).map((item) => <LinkedTradeCard key={`${item.id}-${item.trade_id}`} item={item} />)}
+                <div className="review-article-paper review-article-reading" style={reviewReaderStyle}>
+                  {selected.summary ? (
+                    <Typography.Paragraph className="review-reader-lead">{selected.summary}</Typography.Paragraph>
+                  ) : null}
+                  <ResearchContentPanel showStandardFields={false} value={selected.research_notes || selected.content} />
+                </div>
+
+                <Drawer
+                  title="复盘详情"
+                  placement="right"
+                  width={460}
+                  onClose={() => setReviewDetailDrawerOpen(false)}
+                  open={reviewDetailDrawerOpen}
+                  className="review-detail-drawer"
+                >
+                  <div className="review-drawer-group">
+                    <Typography.Text className="review-drawer-group-title">基本信息</Typography.Text>
+                    <div className="review-drawer-block">
+                      <Typography.Text className="review-drawer-main-title">{selected.title || `Session #${selected.id}`}</Typography.Text>
+                      <Space size={6} wrap>
+                        <Tag>{kindLabel(selected.review_kind)}</Tag>
+                        <Tag>{mapLabel(REVIEW_SCOPE_ZH, selected.review_scope || 'custom')}</Tag>
+                        <Tag color="gold">★{selected.star_rating || 0}</Tag>
+                        {selected.is_favorite ? <Tag color="green">收藏</Tag> : null}
+                      </Space>
+                      <Descriptions size="small" column={1}>
+                        <Descriptions.Item label="选择方式">{selectionModeLabel(selected.selection_mode)}</Descriptions.Item>
+                        <Descriptions.Item label="分组依据">{selected.selection_basis || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="复盘目标">{selected.review_goal || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="更新时间">{formatDateTime(selected.updated_at || selected.created_at)}</Descriptions.Item>
+                      </Descriptions>
                     </div>
-                  )}
-                </InkSection>
-              </Space>
+                  </div>
+
+                  <div className="review-drawer-group">
+                    <Typography.Text className="review-drawer-group-title">会话属性</Typography.Text>
+                    <div className="review-drawer-block">
+                      <Descriptions size="small" column={1}>
+                        <Descriptions.Item label="市场环境">{selected.market_regime || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="重复错误">{selected.repeated_errors || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="下一步聚焦">{selected.next_focus || '-'}</Descriptions.Item>
+                      </Descriptions>
+                      <dl className="review-meta-list">
+                        <dt><Typography.Text type="secondary">标签</Typography.Text></dt>
+                        <dd className="review-detail-tags">
+                          {selectedReviewTags.length > 0
+                            ? selectedReviewTags.map((tag) => <Tag key={tag}>{tag}</Tag>)
+                            : <Typography.Text type="secondary">-</Typography.Text>}
+                        </dd>
+                      </dl>
+                    </div>
+                  </div>
+
+                  {(selected.action_items || (selected.content && selected.research_notes)) ? (
+                    <div className="review-drawer-group">
+                      <Typography.Text className="review-drawer-group-title">后续与记录</Typography.Text>
+                      <div className="review-drawer-block">
+                        {selected.action_items ? (
+                          <dl className="review-meta-list">
+                            <dt><Typography.Text type="secondary">后续动作</Typography.Text></dt>
+                            <dd>
+                              <Typography.Paragraph className="review-drawer-text">
+                                {selected.action_items}
+                              </Typography.Paragraph>
+                            </dd>
+                          </dl>
+                        ) : null}
+                        {selected.content && selected.research_notes ? (
+                          <dl className="review-meta-list">
+                            <dt><Typography.Text type="secondary">详细记录</Typography.Text></dt>
+                            <dd>
+                              <Typography.Paragraph className="review-drawer-text">
+                                {selected.content}
+                              </Typography.Paragraph>
+                            </dd>
+                          </dl>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="review-drawer-group">
+                    <Typography.Text className="review-drawer-group-title">关联交易</Typography.Text>
+                    {(selected.trade_links || []).length === 0 ? (
+                      <Empty description="暂无关联交易" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    ) : (
+                      <div className="review-linked-grid review-linked-grid-drawer">
+                        {(selected.trade_links || []).map((item) => <LinkedTradeCard key={`${item.id}-${item.trade_id}`} item={item} />)}
+                      </div>
+                    )}
+                  </div>
+                </Drawer>
+              </div>
             )}
           </InkSection>
         </Col>

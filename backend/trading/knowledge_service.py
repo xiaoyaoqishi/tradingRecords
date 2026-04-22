@@ -1,4 +1,5 @@
 from typing import Any, Dict, Iterable, List, Optional
+from datetime import datetime
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -90,13 +91,22 @@ def list_knowledge_items(
 
 def list_knowledge_categories(db: Session, owner_role: Optional[str] = None) -> List[str]:
     values = set(KNOWLEDGE_CATEGORY_VALUES)
-    custom_query = db.query(KnowledgeCategory.name).filter(KnowledgeCategory.is_deleted == False)  # noqa: E712
+    custom_query = db.query(KnowledgeCategory.name, KnowledgeCategory.is_deleted)
     if owner_role in {"admin", "user"}:
         custom_query = custom_query.filter(KnowledgeCategory.owner_role == owner_role)
     custom_rows = custom_query.all()
-    for (name,) in custom_rows:
-        if name and str(name).strip():
-            values.add(str(name).strip())
+    deleted_names = set()
+    for name, is_deleted in custom_rows:
+        normalized = str(name or "").strip()
+        if not normalized:
+            continue
+        if is_deleted:
+            deleted_names.add(normalized)
+        else:
+            values.add(normalized)
+
+    if deleted_names:
+        values.difference_update(deleted_names)
 
     query = db.query(KnowledgeItem.category).filter(
         KnowledgeItem.is_deleted == False, KnowledgeItem.category.isnot(None)  # noqa: E712
@@ -131,25 +141,43 @@ def create_knowledge_category(db: Session, name: str, owner_role: str) -> str:
 
 def delete_knowledge_category(db: Session, name: str, owner_role: str) -> None:
     normalized_name = normalize_knowledge_category_name(name)
-    if normalized_name in KNOWLEDGE_CATEGORY_VALUES:
-        raise AppError("knowledge_category_builtin", "内置分类不支持删除", status_code=400)
+    is_builtin = normalized_name in KNOWLEDGE_CATEGORY_VALUES
 
-    in_use = db.query(KnowledgeItem.id).filter(
+    db.query(KnowledgeItem).filter(
         KnowledgeItem.is_deleted == False,  # noqa: E712
         KnowledgeItem.owner_role == owner_role,
         KnowledgeItem.category == normalized_name,
-    ).first()
-    if in_use:
-        raise AppError("knowledge_category_in_use", "分类仍有知识条目在使用，无法删除", status_code=400)
+    ).update({KnowledgeItem.category: "uncategorized"}, synchronize_session=False)
 
     row = db.query(KnowledgeCategory).filter(
         KnowledgeCategory.name == normalized_name,
         KnowledgeCategory.owner_role == owner_role,
-        KnowledgeCategory.is_deleted == False,  # noqa: E712
     ).first()
-    if not row:
-        raise AppError("knowledge_category_not_found", "分类不存在", status_code=404)
-    row.is_deleted = True
+    if row:
+        if row.is_deleted:
+            # idempotent delete: already deleted, treat as success
+            db.commit()
+            return
+        row.is_deleted = True
+        row.deleted_at = datetime.utcnow()
+        db.commit()
+        return
+
+    if not is_builtin:
+        # Legacy/implicit category: only existed on knowledge_items rows.
+        # At this point rows have already been migrated to "uncategorized",
+        # so treat as successful no-op instead of 404.
+        db.commit()
+        return
+
+    db.add(
+        KnowledgeCategory(
+            name=normalized_name,
+            owner_role=owner_role,
+            is_deleted=True,
+            deleted_at=datetime.utcnow(),
+        )
+    )
     db.commit()
 
 
