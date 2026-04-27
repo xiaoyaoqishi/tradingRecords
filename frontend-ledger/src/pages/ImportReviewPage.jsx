@@ -28,6 +28,8 @@ import PageHeader from '../components/PageHeader'
 import ReviewDetailPanel from '../components/ReviewDetailPanel'
 import ReviewTable from '../components/ReviewTable'
 
+const COMMIT_ELIGIBLE_STATUSES = new Set(['confirmed', 'approved', 'accepted'])
+
 export default function ImportReviewPage() {
   const navigate = useNavigate()
   const { batchId } = useParams()
@@ -89,12 +91,13 @@ export default function ImportReviewPage() {
     return allRows.filter((row) => {
       if (statusFilter === 'all') return true
       if (statusFilter === 'unrecognized') return isRowPendingRecognition(row)
+      if (statusFilter === 'committable') return COMMIT_ELIGIBLE_STATUSES.has(row.review_status)
       return row.review_status === statusFilter
     })
   }, [allRows, statusFilter])
 
   const counts = useMemo(() => {
-    const confirmed = allRows.filter((x) => x.review_status === 'confirmed').length
+    const committable = allRows.filter((x) => COMMIT_ELIGIBLE_STATUSES.has(x.review_status)).length
     const pending = allRows.filter((x) => x.review_status === 'pending').length
     const duplicate = allRows.filter((x) => x.review_status === 'duplicate').length
     const identified = allRows.filter((x) => !isRowPendingRecognition(x)).length
@@ -105,7 +108,7 @@ export default function ImportReviewPage() {
         x.review_status === 'pending' &&
         !x.duplicate_type,
     ).length
-    return { confirmed, pending, duplicate, identified, unrecognized, highConfidenceReady }
+    return { committable, pending, duplicate, identified, unrecognized, highConfidenceReady }
   }, [allRows, highConfidenceThreshold])
 
   const parseOnlyRows = useMemo(
@@ -326,7 +329,7 @@ export default function ImportReviewPage() {
       <Alert
         type="warning"
         showIcon
-        message="校对台只会在提交时导入已确认行。请先批量或单条确认。"
+        message="校对台提交只会处理 confirmed / approved / accepted 行；pending / ignored / rejected / duplicate 不会入账。"
       />
       {parseOnlyRows > 0 ? (
         <Alert
@@ -348,7 +351,7 @@ export default function ImportReviewPage() {
         <Space wrap size={16}>
           <Statistic title="待确认" value={counts.pending} />
           <Statistic title="重复标记" value={counts.duplicate} />
-          <Statistic title="已确认" value={counts.confirmed} />
+          <Statistic title="可提交" value={counts.committable} />
           <Statistic title="已完成识别" value={counts.identified} />
           <Statistic title="待识别" value={counts.unrecognized} />
           <Statistic title="高置信可确认" value={counts.highConfidenceReady} />
@@ -381,7 +384,11 @@ export default function ImportReviewPage() {
               { label: '全部', value: 'all' },
               { label: '待确认', value: 'pending' },
               { label: '待识别', value: 'unrecognized' },
-              { label: '已确认', value: 'confirmed' },
+              { label: '可提交', value: 'committable' },
+              { label: '已忽略', value: 'ignored' },
+              { label: '已拒绝', value: 'rejected' },
+              { label: '重复标记', value: 'duplicate' },
+              { label: '已入账', value: 'committed' },
             ]}
             onChange={setStatusFilter}
           />
@@ -440,12 +447,26 @@ export default function ImportReviewPage() {
           </Button>
           <Button
             type="primary"
-            disabled={counts.confirmed <= 0}
+            disabled={counts.committable <= 0}
             onClick={async () => {
               setLoading(true)
               try {
                 const payload = await commitImportBatch(batchId)
                 message.success(`提交完成：入账 ${payload.committed_count ?? payload.created_count ?? 0}，跳过 ${payload.skipped_count ?? 0}，失败 ${payload.failed_count ?? 0}`)
+                if (Array.isArray(payload?.errors) && payload.errors.length) {
+                  Modal.warning({
+                    title: '部分记录未能入账',
+                    content: (
+                      <div>
+                        {payload.errors.slice(0, 5).map((item) => (
+                          <div key={`${item.row_id}-${item.error}`}>
+                            行 #{item.row_id}：{item.message || item.error || '提交失败'}
+                          </div>
+                        ))}
+                      </div>
+                    ),
+                  })
+                }
                 await load()
               } finally {
                 setLoading(false)
@@ -577,7 +598,7 @@ export default function ImportReviewPage() {
           <Alert
             type="info"
             showIcon
-            message="先预览命中范围，再确认创建。创建成功后会自动重识别未确认记录。"
+            message="先预览命中范围，再确认创建。若方向不明确，前端不会假定新分类自动落为支出，会保留待人工确认语义。"
           />
           {ruleSamples.length ? (
             <Card size="small" title="样本与提取条件">

@@ -9,9 +9,24 @@ export default function ReviewDetailPanel({ open, row, onClose }) {
   const statusLabel = {
     pending: '待确认',
     confirmed: '已确认',
+    approved: '已批准',
+    accepted: '已接受',
     duplicate: '重复',
+    ignored: '已忽略',
+    rejected: '已拒绝',
     invalid: '无效',
     committed: '已入账',
+  }
+  const statusColor = {
+    pending: 'blue',
+    confirmed: 'green',
+    approved: 'green',
+    accepted: 'green',
+    duplicate: 'orange',
+    ignored: 'default',
+    rejected: 'red',
+    invalid: 'red',
+    committed: 'cyan',
   }
   const duplicateLabel = {
     exact_duplicate: '完全重复',
@@ -30,7 +45,7 @@ export default function ReviewDetailPanel({ open, row, onClose }) {
         <>
           <Descriptions column={1} size="small" bordered>
             <Descriptions.Item label="校对状态">
-              <Tag color={row.review_status === 'confirmed' ? 'green' : row.review_status === 'duplicate' ? 'orange' : 'blue'}>
+              <Tag color={statusColor[row.review_status] || 'blue'}>
                 {statusLabel[row.review_status] || row.review_status}
               </Tag>
             </Descriptions.Item>

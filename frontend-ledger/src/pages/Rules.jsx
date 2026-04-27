@@ -45,7 +45,7 @@ const RULE_FORM_HELP = [
   { key: '目标平台', text: '规则命中后回填的平台名称。通常用于来源识别规则。' },
   { key: '目标商户', text: '规则命中后统一成的商户名。通常用于商户归一规则。' },
   { key: '目标交易类型', text: '规则命中后设置的交易类型（例如支出、转账）。留空则不改。' },
-  { key: '目标场景', text: '规则命中后设置的消费场景（如餐饮、购物）。' },
+  { key: '目标场景', text: '规则命中后设置的消费场景（如餐饮、购物）。如果方向不明确，前端不会暗示系统自动把新分类建成 expense。' },
   { key: '目标分类编号', text: '规则命中后写入的分类编号。建议与分类管理中的编号保持一致。' },
   { key: '目标子分类编号', text: '可选。用于更细颗粒度分类。' },
   { key: '说明', text: '给规则写备注，建议写“规则目的 + 适用范围”。' },
@@ -267,6 +267,12 @@ export default function Rules() {
               ))}
             </div>
           }
+        />
+        <Alert
+          style={{ marginBottom: 12 }}
+          type="warning"
+          showIcon
+          message="如果规则命中的方向不明确，后端不会把新分类自动创建成支出分类；请明确填写方向条件或保留人工确认。"
         />
         <Form form={form} layout="vertical">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(160px, 1fr))', gap: 12 }}>

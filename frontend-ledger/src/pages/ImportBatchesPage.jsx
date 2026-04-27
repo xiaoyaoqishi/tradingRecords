@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Popconfirm, Space, Table, Tag, message } from 'antd'
+import { Alert, Button, Card, Modal, Popconfirm, Space, Table, Tag, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import {
   classifyImportBatch,
@@ -15,6 +15,12 @@ import {
 import BatchToolbar from '../components/BatchToolbar'
 import PageHeader from '../components/PageHeader'
 import { formatDateTime } from '../utils/date'
+
+const COMMIT_ELIGIBLE_STATUSES = new Set(['confirmed', 'approved', 'accepted'])
+
+function buildCommitResultMessage(payload) {
+  return `提交完成：入账 ${Number(payload?.committed_count || 0)}，跳过 ${Number(payload?.skipped_count || 0)}，失败 ${Number(payload?.failed_count || 0)}`
+}
 
 export default function ImportBatchesPage() {
   const navigate = useNavigate()
@@ -35,10 +41,10 @@ export default function ImportBatchesPage() {
         items.slice(0, 30).map(async (item) => {
           const review = await listImportReviewRows(item.id)
           const reviewRows = Array.isArray(review?.items) ? review.items : []
-          const confirmedCount = reviewRows.filter((x) => x.review_status === 'confirmed').length
+          const committableCount = reviewRows.filter((x) => COMMIT_ELIGIBLE_STATUSES.has(x.review_status)).length
           const pendingCount = reviewRows.filter((x) => x.review_status === 'pending').length
           const duplicateCount = reviewRows.filter((x) => x.review_status === 'duplicate').length
-          return [item.id, { confirmedCount, pendingCount, duplicateCount }]
+          return [item.id, { committableCount, pendingCount, duplicateCount }]
         }),
       )
       setStatsMap(Object.fromEntries(pair))
@@ -76,7 +82,7 @@ export default function ImportBatchesPage() {
     }
   }
 
-  const canCommit = (row) => Number(statsMap[row.id]?.confirmedCount || 0) > 0
+  const canCommit = (row) => Number(statsMap[row.id]?.committableCount || 0) > 0
 
   const statusColor = useMemo(
     () => ({
@@ -113,7 +119,11 @@ export default function ImportBatchesPage() {
         }} />}
       />
 
-      <Alert type="info" showIcon message="提交入账仅导入已确认行；“清理重复标记”不会执行真实重复检测，只会复位已有重复标记。" />
+      <Alert
+        type="info"
+        showIcon
+        message="提交入账只会处理 confirmed / approved / accepted 状态；pending / ignored / rejected / duplicate 不会入账。“清理重复标记”不会执行真实重复检测，只会复位已有重复标记。"
+      />
 
       {errorMessage ? <Alert type="error" showIcon message={errorMessage} /> : null}
 
@@ -135,7 +145,7 @@ export default function ImportBatchesPage() {
             { title: '总条数', dataIndex: 'total_rows', width: 90 },
             { title: '待确认', key: 'pending', width: 90, render: (_, row) => statsMap[row.id]?.pendingCount ?? row.review_rows ?? 0 },
             { title: '重复数', key: 'dup', width: 90, render: (_, row) => statsMap[row.id]?.duplicateCount ?? row.duplicate_rows ?? 0 },
-            { title: '已确认/可提交', key: 'confirmed', width: 120, render: (_, row) => statsMap[row.id]?.confirmedCount ?? 0 },
+            { title: '可提交', key: 'committable', width: 120, render: (_, row) => statsMap[row.id]?.committableCount ?? 0 },
             { title: '创建时间', dataIndex: 'created_at', width: 170, render: (v) => (v ? formatDateTime(v) : '-') },
             {
               title: '操作',
@@ -152,13 +162,36 @@ export default function ImportBatchesPage() {
                   <Button
                     type="link"
                     disabled={!canCommit(row)}
-                    onClick={() => triggerStep(row.id, commitImportBatch, '提交')}
+                    onClick={async () => {
+                      setLoading(true)
+                      try {
+                        const payload = await commitImportBatch(row.id)
+                        message.success(buildCommitResultMessage(payload))
+                        if (Array.isArray(payload?.errors) && payload.errors.length) {
+                          Modal.warning({
+                            title: '部分记录未能入账',
+                            content: (
+                              <div>
+                                {payload.errors.slice(0, 5).map((item) => (
+                                  <div key={`${item.row_id}-${item.error}`}>
+                                    行 #{item.row_id}：{item.message || item.error || '提交失败'}
+                                  </div>
+                                ))}
+                              </div>
+                            ),
+                          })
+                        }
+                        await load()
+                      } finally {
+                        setLoading(false)
+                      }
+                    }}
                   >
                     提交
                   </Button>
                   <Popconfirm
-                    title="删除导入批次"
-                    description="将删除该批次、导入行和关联导入交易，且不可恢复。确认继续吗？"
+                    title="删除并回滚导入批次"
+                    description="删除导入批次会回滚该批次生成的已入账交易，并同时删除导入行；操作不可逆。确认继续吗？"
                     okText="删除"
                     cancelText="取消"
                     onConfirm={() => triggerStep(row.id, deleteImportBatch, '删除')}

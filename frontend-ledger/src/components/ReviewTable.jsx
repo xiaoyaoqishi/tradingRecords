@@ -10,6 +10,21 @@ function displayOrPending(value) {
   return text && text !== '未识别' ? text : '待识别'
 }
 
+function reviewStatusMeta(status) {
+  const map = {
+    pending: { label: '待确认', color: 'blue' },
+    confirmed: { label: '已确认', color: 'green' },
+    approved: { label: '已批准', color: 'green' },
+    accepted: { label: '已接受', color: 'green' },
+    ignored: { label: '已忽略', color: 'default' },
+    rejected: { label: '已拒绝', color: 'red' },
+    duplicate: { label: '重复标记', color: 'orange' },
+    invalid: { label: '无效', color: 'red' },
+    committed: { label: '已入账', color: 'cyan' },
+  }
+  return map[status] || { label: status || '-', color: 'default' }
+}
+
 export default function ReviewTable({
   rows,
   loading,
@@ -112,6 +127,15 @@ export default function ReviewTable({
           filters: categoryFilters,
           filterSearch,
           onFilter: (value, record) => displayOrPending(record.category_name) === String(value),
+        },
+        {
+          title: '状态',
+          dataIndex: 'review_status',
+          width: 110,
+          render: (v) => {
+            const meta = reviewStatusMeta(v)
+            return <Tag color={meta.color}>{meta.label}</Tag>
+          },
         },
         { title: '置信度', dataIndex: 'confidence', width: 90, render: (v) => Number(v || 0).toFixed(2) },
         {
