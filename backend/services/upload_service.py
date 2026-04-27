@@ -1,4 +1,4 @@
-from services import runtime
+from services import utility_runtime
 
-upload = runtime.upload_file
-get_upload = runtime.get_upload
+upload = utility_runtime.upload_file
+get_upload = utility_runtime.get_upload

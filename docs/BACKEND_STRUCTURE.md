@@ -31,6 +31,10 @@
 
 ## 历史债务说明
 
-- `runtime.py` 当前上限已下调为 `2420` 行，并继续以 `scripts/check_runtime_size.py` 强制守护。
+- `runtime.py` 当前上限已下调为 `1592` 行，并继续以 `scripts/check_runtime_size.py` 强制守护。
 - 其中同时存在初始化、兼容迁移和历史业务代码，这种混合状态需要后续单独拆分。
 - auth/admin/audit 运行期逻辑已迁出；后续拆分应单独发起，不要在业务需求顺手继续扩大该文件。
+- review / review_session 运行期逻辑已迁出到 `backend/services/review_runtime.py`，后续新的 review 展示转换、review_session CRUD、trade link 同步与 create-from-selection 逻辑不得写回 `runtime.py`。
+- trade_plan 运行期逻辑已迁出到 `backend/services/trade_plan_runtime.py`，后续新的 plan CRUD、trade link / review-session link 同步与 follow-up review session 逻辑不得写回 `runtime.py`。
+- knowledge 运行期逻辑已迁出到 `backend/services/knowledge_runtime.py`，后续新的 knowledge item CRUD、category 管理、tag/related note 聚合逻辑不得写回 `runtime.py`。
+- poem / upload 小模块运行期逻辑已迁出到 `backend/services/utility_runtime.py`；health 逻辑当前仍在 `backend/routers/health.py` 内联，本轮无需迁出。

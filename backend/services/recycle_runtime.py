@@ -18,7 +18,8 @@ from models import (
     TradePlanTradeLink,
 )
 from services import notes_runtime
-from services import runtime as legacy_runtime
+from services import review_runtime
+from services import trade_plan_runtime
 from trading.knowledge_service import attach_knowledge_item_related_notes as _knowledge_attach_related_notes
 from trading.source_service import attach_trade_view_fields as _attach_trade_view_fields
 from trading.tag_service import attach_knowledge_item_tags as _attach_knowledge_item_tags
@@ -138,7 +139,7 @@ def purge_recycle_trade_broker(broker_id: int, db: Session = Depends(get_db)):
 
 
 def _attach_review_session_fields(db: Session, rows: List[ReviewSession]) -> List[ReviewSession]:
-    return legacy_runtime._attach_review_session_fields(db, rows)
+    return review_runtime._attach_review_session_fields(db, rows)
 
 
 def list_recycle_review_sessions(
@@ -189,7 +190,7 @@ def purge_recycle_review_session(review_session_id: int, db: Session = Depends(g
 
 
 def _attach_trade_plan_fields(db: Session, rows: List[TradePlan]) -> List[TradePlan]:
-    return legacy_runtime._attach_trade_plan_fields(db, rows)
+    return trade_plan_runtime._attach_trade_plan_fields(db, rows)
 
 
 def list_recycle_trade_plans(
