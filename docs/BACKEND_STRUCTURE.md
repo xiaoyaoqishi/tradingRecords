@@ -16,6 +16,7 @@
 - 禁止在其中新增新的领域规则、复杂查询拼装、写入流程或模块专属 service。
 - 禁止把本应进入 router / domain service / dedicated service 的逻辑，再次回灌到 `runtime.py`。
 - `monitor` 运行期逻辑已迁出到 `backend/services/monitor_runtime.py`，后续新的 monitor 采样、巡检、系统信息聚合与 monitor 站点管理逻辑不得写回 `runtime.py`。
+- `notes / notebook / todo` 运行期逻辑已迁出到 `backend/services/notes_runtime.py`，后续新的 notes 域查询、笔记链接索引、默认 notebook 初始化、回收站处理与 todo 逻辑不得写回 `runtime.py`。
 
 ## 新逻辑落点
 
@@ -26,6 +27,6 @@
 
 ## 历史债务说明
 
-- `runtime.py` 当前上限已下调为 `3994` 行，继续以 `scripts/check_runtime_size.py` 强制守护。
+- `runtime.py` 当前上限已下调为 `3354` 行，继续以 `scripts/check_runtime_size.py` 强制守护。
 - 其中同时存在初始化、兼容迁移和历史业务代码，这种混合状态需要后续单独拆分。
 - 后续拆分应单独发起，不要在业务需求顺手继续扩大该文件。
