@@ -37,29 +37,37 @@ if ! rg -n '/ledger/assets/' "$ROOT_DIR/frontend-ledger/dist/index.html" >/dev/n
   exit 1
 fi
 
-echo "[4/5] 检查 /ledger/import /ledger/rules /ledger/recurring 路由入口"
-if ! rg -n 'path=\"/import\"' "$ROOT_DIR/frontend-ledger/src/App.jsx" >/dev/null; then
-  echo "FAIL: frontend-ledger 缺少 /ledger/import 路由"
+echo "[4/5] 检查 /ledger/imports /ledger/merchants /ledger/rules /ledger/analytics 路由入口"
+if ! rg -n 'path=\"/imports\"' "$ROOT_DIR/frontend-ledger/src/App.jsx" >/dev/null; then
+  echo "FAIL: frontend-ledger 缺少 /ledger/imports 路由"
+  exit 1
+fi
+if ! rg -n 'path=\"/merchants\"' "$ROOT_DIR/frontend-ledger/src/App.jsx" >/dev/null; then
+  echo "FAIL: frontend-ledger 缺少 /ledger/merchants 路由"
   exit 1
 fi
 if ! rg -n 'path=\"/rules\"' "$ROOT_DIR/frontend-ledger/src/App.jsx" >/dev/null; then
   echo "FAIL: frontend-ledger 缺少 /ledger/rules 路由"
   exit 1
 fi
-if ! rg -n 'path=\"/recurring\"' "$ROOT_DIR/frontend-ledger/src/App.jsx" >/dev/null; then
-  echo "FAIL: frontend-ledger 缺少 /ledger/recurring 路由"
+if ! rg -n 'path=\"/analytics\"' "$ROOT_DIR/frontend-ledger/src/App.jsx" >/dev/null; then
+  echo "FAIL: frontend-ledger 缺少 /ledger/analytics 路由"
   exit 1
 fi
-if ! rg -n "key: '/import'" "$ROOT_DIR/frontend-ledger/src/components/IconSidebar.jsx" >/dev/null; then
+if ! rg -n "key: '/imports'" "$ROOT_DIR/frontend-ledger/src/components/IconSidebar.jsx" >/dev/null; then
   echo "FAIL: frontend-ledger 侧边栏缺少导入入口"
+  exit 1
+fi
+if ! rg -n "key: '/merchants'" "$ROOT_DIR/frontend-ledger/src/components/IconSidebar.jsx" >/dev/null; then
+  echo "FAIL: frontend-ledger 侧边栏缺少商户词典入口"
   exit 1
 fi
 if ! rg -n "key: '/rules'" "$ROOT_DIR/frontend-ledger/src/components/IconSidebar.jsx" >/dev/null; then
   echo "FAIL: frontend-ledger 侧边栏缺少规则入口"
   exit 1
 fi
-if ! rg -n "key: '/recurring'" "$ROOT_DIR/frontend-ledger/src/components/IconSidebar.jsx" >/dev/null; then
-  echo "FAIL: frontend-ledger 侧边栏缺少周期账单入口"
+if ! rg -n "key: '/analytics'" "$ROOT_DIR/frontend-ledger/src/components/IconSidebar.jsx" >/dev/null; then
+  echo "FAIL: frontend-ledger 侧边栏缺少分析入口"
   exit 1
 fi
 

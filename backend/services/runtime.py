@@ -350,7 +350,7 @@ def _migrate_legacy_schema():
             _ensure_sqlite_column(db, "trade_plans", "deleted_at", "DATETIME")
             _ensure_sqlite_column(db, "trade_plans", "owner_role", "VARCHAR(20) DEFAULT 'admin'")
         if _table_exists(db, "ledger_transactions"):
-            _ensure_sqlite_column(db, "ledger_transactions", "recurring_rule_id", "INTEGER")
+            _ensure_sqlite_column(db, "ledger_transactions", "confidence_score", "FLOAT")
         for table in (
             "trades",
             "review_sessions",
@@ -4156,6 +4156,7 @@ def _get_system_info():
     boot = psutil.boot_time()
     uptime = _time.time() - boot
     hostname = platform.node()
+    platform_name = platform.system()
     kernel = platform.release()
     arch = platform.machine()
     try:
@@ -4168,10 +4169,12 @@ def _get_system_info():
     return {
         "hostname": hostname,
         "os": os_name,
+        "platform": platform_name,
         "kernel": kernel,
         "arch": arch,
         "uptime": _seconds_fmt(uptime),
         "uptime_seconds": int(uptime),
+        "boot_time": datetime.fromtimestamp(boot).strftime("%Y-%m-%d %H:%M:%S"),
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -4305,14 +4308,58 @@ def _get_services_status():
 
 def monitor_realtime():
     _require_admin()
+    system = _get_system_info()
+    cpu = _get_cpu_info()
+    memory = _get_memory_info()
+    disk = _get_disk_info()
+    network = _get_network_info()
+    sampled_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    disk_percent = None
+    disk_used_gb = None
+    disk_total_gb = None
+    try:
+        partitions = disk.get("partitions") or []
+        primary = next((x for x in partitions if x.get("mountpoint") == "/"), None) or (partitions[0] if partitions else None)
+        if primary:
+            disk_percent = primary.get("percent")
+            total = primary.get("total")
+            used = primary.get("used")
+            if isinstance(total, (int, float)):
+                disk_total_gb = round(total / 1024 / 1024 / 1024, 2)
+            if isinstance(used, (int, float)):
+                disk_used_gb = round(used / 1024 / 1024 / 1024, 2)
+    except Exception:
+        pass
+
+    load_avg = None
+    try:
+        raw_load = os.getloadavg()
+        load_avg = {
+            "1m": round(raw_load[0], 2),
+            "5m": round(raw_load[1], 2),
+            "15m": round(raw_load[2], 2),
+        }
+    except (AttributeError, OSError):
+        load_avg = None
+
     return {
-        "system": _get_system_info(),
-        "cpu": _get_cpu_info(),
-        "memory": _get_memory_info(),
-        "disk": _get_disk_info(),
-        "network": _get_network_info(),
+        "system": system,
+        "cpu": cpu,
+        "memory": memory,
+        "disk": disk,
+        "network": network,
         "processes": _get_top_processes(),
         "services": _get_services_status(),
+        "disk_percent": disk_percent,
+        "disk_used_gb": disk_used_gb,
+        "disk_total_gb": disk_total_gb,
+        "load_avg": load_avg,
+        "uptime_seconds": system.get("uptime_seconds"),
+        "boot_time": system.get("boot_time"),
+        "platform": system.get("platform"),
+        "architecture": system.get("arch"),
+        "sampled_at": sampled_at,
     }
 
 

@@ -9,7 +9,7 @@
 - `Trading`: Trade records, analytics, review sessions, plans, and research or knowledge workflow.
 - `Notes`: Notebooks, diary and document notes, backlinks, todo, and recycle flow.
 - `Monitor`: Admin-side server metrics, site checks, users, and audit logs.
-- `Ledger`: Standalone personal finance app for accounts, transactions, rules, imports, and recurring bills.
+- `Ledger`: Standalone personal finance app centered on import batches, review workbench, rules, merchants, and analytics.
 - `Portal`: Static home page and login entry for the workspace.
 - `Backend`: Shared FastAPI API, auth, data permissions, uploads, and SQLite-backed services.
 
@@ -49,8 +49,7 @@
 - Import-first bookkeeping pipeline centered on `import batches`.
 - Source detection and row-level staging (`ledger_import_rows`) before final commit.
 - Layered rule engine (source -> merchant normalization -> category -> fallback), with built-in CN rules and per-layer trace.
-- Enhanced dedupe (`exact_duplicate` / `probable_duplicate` / `review_duplicate`) based on account/time/amount/direction/merchant/fingerprint.
-  - Auto duplicate tagging is currently disabled by default to avoid false positives on frequent same-merchant spending.
+- The `/dedupe` step is retained as a review-stage cleanup action, but automatic duplicate tagging is currently disabled to avoid false positives on frequent same-merchant spending.
 - Review queue backend closure: bulk category fix, bulk merchant normalization, bulk confirm, and one-click rule generation from manual fixes.
 - Import review workbench supports creating rules directly from selected samples (merchant/category/both/source-platform, no category-id input, category dropdown includes "其他", hit-range preview, duplicate skipping, and selectable re-identify scope: unconfirmed or all rows).
 - Review workbench hardening: batch selection, replay rules for the current batch, reclassify pending rows, and a table-top action toolbar for refresh/replay/commit.

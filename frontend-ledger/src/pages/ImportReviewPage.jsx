@@ -58,7 +58,7 @@ export default function ImportReviewPage() {
     uploaded: '已上传',
     parsed: '已解析',
     classified: '已分类',
-    deduped: '已去重',
+    deduped: '已清理重复标记',
     committed: '已提交',
   }
 
@@ -347,7 +347,7 @@ export default function ImportReviewPage() {
       <Card className="page-card">
         <Space wrap size={16}>
           <Statistic title="待确认" value={counts.pending} />
-          <Statistic title="重复" value={counts.duplicate} />
+          <Statistic title="重复标记" value={counts.duplicate} />
           <Statistic title="已确认" value={counts.confirmed} />
           <Statistic title="已完成识别" value={counts.identified} />
           <Statistic title="待识别" value={counts.unrecognized} />
@@ -445,7 +445,7 @@ export default function ImportReviewPage() {
               setLoading(true)
               try {
                 const payload = await commitImportBatch(batchId)
-                message.success(`提交完成：新增 ${payload.created_count}，跳过 ${payload.skipped_count}`)
+                message.success(`提交完成：入账 ${payload.committed_count ?? payload.created_count ?? 0}，跳过 ${payload.skipped_count ?? 0}，失败 ${payload.failed_count ?? 0}`)
                 await load()
               } finally {
                 setLoading(false)

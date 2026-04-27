@@ -16,9 +16,9 @@ def _run_to_rows(admin_login, batch_id: int):
 
 def test_ledger_analytics_endpoints(admin_login):
     csv_text = """摘要,交易日期,交易金额,账户余额,交易地点/附言
-消费,20260123,-6.50,15136.14,财付通-微信支付-三津汤包
-消费,20260124,-24.70,14997.18,美团支付-美团App农耕记湖南土菜（南山万科云城店）
-消费,20260125,-9.80,14839.38,线下门店测试小店A
+消费,20260223,-6.50,15136.14,财付通-微信支付-三津汤包
+消费,20260224,-24.70,14997.18,美团支付-美团App农耕记湖南土菜（南山万科云城店）
+消费,20260225,-9.80,14839.38,线下门店测试小店A
 """
     batch_id = _post_file(admin_login, "analytics.csv", csv_text.encode("utf-8"), "text/csv")
     _run_to_rows(admin_login, batch_id)
@@ -37,7 +37,7 @@ def test_ledger_analytics_endpoints(admin_login):
     assert commit_resp.status_code == 200
     assert int(commit_resp.json()["created_count"]) == 3
 
-    params = {"date_from": "2026-01-01", "date_to": "2026-01-31"}
+    params = {"date_from": "2026-02-01", "date_to": "2026-02-28"}
 
     summary = admin_login.get("/api/ledger/analytics/summary", params=params)
     assert summary.status_code == 200

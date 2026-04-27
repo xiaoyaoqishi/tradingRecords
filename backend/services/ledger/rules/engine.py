@@ -12,7 +12,14 @@ from services.ledger.rules.matchers import text_match
 from services.ledger.rules.merchant_resolver import resolve_merchant
 
 
-def _ensure_category(db: Session, owner_role: str, name: str) -> int:
+def _infer_category_type_from_scene(scene: str | None) -> str:
+    normalized = str(scene or "").strip().lower()
+    if normalized in {"income", "收入", "工资", "salary", "bonus", "奖金", "refund_income", "退款"}:
+        return "income"
+    return "expense"
+
+
+def _ensure_category(db: Session, owner_role: str, name: str, category_type: str | None = None) -> int:
     row = db.query(LedgerCategory).filter(
         LedgerCategory.owner_role == owner_role,
         LedgerCategory.name == name,
@@ -20,7 +27,11 @@ def _ensure_category(db: Session, owner_role: str, name: str) -> int:
     ).first()
     if row:
         return int(row.id)
-    created = LedgerCategory(name=name, category_type="expense", owner_role=owner_role)
+    created = LedgerCategory(
+        name=name,
+        category_type=category_type or "expense",
+        owner_role=owner_role,
+    )
     db.add(created)
     db.flush()
     return int(created.id)
@@ -131,7 +142,7 @@ def _scene_to_category_id(db: Session, owner_role: str, scene: str | None) -> in
         "线下其他待确认": "线下其他待确认",
     }
     name = mapping.get(scene, scene)
-    return _ensure_category(db, owner_role, name)
+    return _ensure_category(db, owner_role, name, category_type=_infer_category_type_from_scene(name))
 
 
 def _apply_source_layer(row: LedgerImportRow, rules: list[LedgerRule], text: str, trace: dict[str, Any]) -> None:

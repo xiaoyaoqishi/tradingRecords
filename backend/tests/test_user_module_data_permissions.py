@@ -29,7 +29,7 @@ def test_user_module_visibility_and_readonly(admin_login):
     assert payload['data_permissions']['notes'] == 'read_only'
 
     # hidden module
-    ledger_list = client.get('/api/ledger/accounts')
+    ledger_list = client.get('/api/ledger/import-batches')
     assert ledger_list.status_code == 403
 
     # visible module read

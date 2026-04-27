@@ -172,6 +172,7 @@ class LedgerTransaction(Base):
     category_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
     subcategory_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
     duplicate_key = Column(String(120), nullable=True, index=True)
+    confidence_score = Column(Float, nullable=True)
     review_note = Column(Text, nullable=True)
     owner_role = Column(String(20), default="admin", index=True)
     is_deleted = Column(Boolean, default=False, index=True)

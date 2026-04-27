@@ -59,9 +59,52 @@ PLATFORM_DISPLAY = {
     "unkonwn": "其他",
 }
 
+COMMIT_ELIGIBLE_STATUSES = {"confirmed", "approved", "accepted"}
+
 
 def _json_dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
+
+
+def _normalize_category_type_from_direction(value: Any) -> Optional[str]:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"expense", "out", "debit"}:
+        return "expense"
+    if normalized in {"income", "in", "credit"}:
+        return "income"
+    return None
+
+
+def _infer_category_type_from_rows(rows: list[LedgerImportRow]) -> Optional[str]:
+    inferred = {
+        value
+        for value in (_normalize_category_type_from_direction(row.direction) for row in rows)
+        if value
+    }
+    if len(inferred) == 1:
+        return next(iter(inferred))
+    return None
+
+
+def _refresh_batch_metrics(db: Session, batch: LedgerImportBatch) -> None:
+    rows = db.query(
+        LedgerImportRow.review_status,
+        LedgerImportRow.category_id,
+        LedgerImportRow.confidence,
+        LedgerImportRow.duplicate_type,
+    ).filter(LedgerImportRow.batch_id == batch.id).all()
+    total_rows = len(rows)
+    batch.total_rows = total_rows
+    batch.parsed_rows = total_rows
+    batch.matched_rows = sum(
+        1
+        for review_status, category_id, confidence, _duplicate_type in rows
+        if category_id is not None and float(confidence or 0.0) >= 0.7 and review_status != "duplicate"
+    )
+    batch.review_rows = sum(1 for review_status, _category_id, _confidence, _duplicate_type in rows if review_status != "committed")
+    batch.duplicate_rows = sum(
+        1 for review_status, _category_id, _confidence, duplicate_type in rows if review_status == "duplicate" or duplicate_type
+    )
 
 
 def _batch_to_item(row: LedgerImportBatch) -> dict[str, Any]:
@@ -208,6 +251,7 @@ def _resolve_category_ids_by_name(
     owner_role: str,
     target_category_name: Optional[str],
     target_subcategory_name: Optional[str],
+    category_type: Optional[str] = None,
 ) -> tuple[Optional[int], Optional[int]]:
     category_id: Optional[int] = None
     subcategory_id: Optional[int] = None
@@ -219,11 +263,13 @@ def _resolve_category_ids_by_name(
             LedgerCategory.is_deleted == False,  # noqa: E712
         ).first()
         if not category:
+            if not category_type:
+                raise AppError("ambiguous_category_type", f"无法判断分类类型：{target_category_name}", status_code=400)
             category = LedgerCategory(
                 owner_role=owner_role,
                 parent_id=None,
                 name=target_category_name.strip(),
-                category_type="expense",
+                category_type=category_type,
                 sort_order=999,
                 is_active=True,
             )
@@ -398,6 +444,9 @@ def delete_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]
     ]
 
     if row_ids:
+        # Product semantic:
+        # deleting an import batch means rolling back everything created from that batch,
+        # including already committed ledger transactions linked by batch_id/import_row_id.
         db.query(LedgerTransaction).filter(
             or_(
                 LedgerTransaction.batch_id == batch.id,
@@ -415,7 +464,7 @@ def delete_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]
         except Exception:
             pass
 
-    return {"deleted": True, "batch_id": batch_id}
+    return {"deleted": True, "batch_id": batch_id, "deleted_row_count": len(row_ids)}
 
 
 def parse_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]:
@@ -481,9 +530,7 @@ def parse_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]:
     batch.total_rows = len(rows)
     batch.parsed_rows = parsed_rows
     batch.status = "parsed"
-    batch.matched_rows = 0
-    batch.review_rows = parsed_rows
-    batch.duplicate_rows = 0
+    _refresh_batch_metrics(db, batch)
 
     db.commit()
     db.refresh(batch)
@@ -509,6 +556,7 @@ def classify_import_batch(db: Session, role: str, batch_id: int) -> dict[str, An
     batch.matched_rows = int(result.get("matched_rows", 0))
     batch.review_rows = int(result.get("review_rows", 0))
     batch.status = "classified"
+    _refresh_batch_metrics(db, batch)
 
     db.commit()
     db.refresh(batch)
@@ -525,6 +573,7 @@ def reprocess_import_batch(db: Session, role: str, batch_id: int) -> dict[str, A
     batch.matched_rows = int(result.get("matched_rows", 0))
     batch.review_rows = int(result.get("review_rows", 0))
     batch.status = "classified"
+    _refresh_batch_metrics(db, batch)
     db.commit()
 
     return dedupe_import_batch(db, role=role, batch_id=batch_id)
@@ -559,7 +608,8 @@ def dedupe_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]
     if not rows:
         raise AppError("empty_batch", "当前批次没有可去重的行", status_code=400)
 
-    # 用户指定：关闭去重能力，避免同商户多次消费被误判为重复。
+    # 当前产品语义：保留 /dedupe 入口，但不做自动重复检测。
+    # 该步骤仅清空历史重复标记，避免误导用户认为系统已经完成真实去重。
     for row in rows:
         row.duplicate_type = None
         row.duplicate_score = 0.0
@@ -567,11 +617,7 @@ def dedupe_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]
         if row.review_status == "duplicate":
             row.review_status = "pending"
 
-    batch.duplicate_rows = 0
-    batch.review_rows = db.query(LedgerImportRow.id).filter(
-        LedgerImportRow.batch_id == batch.id,
-        LedgerImportRow.review_status.in_(["pending", "confirmed"]),
-    ).count()
+    _refresh_batch_metrics(db, batch)
     batch.status = "deduped"
 
     db.commit()
@@ -585,7 +631,7 @@ def list_review_rows(db: Session, role: str, batch_id: int, status: Optional[str
     if status:
         q = q.filter(LedgerImportRow.review_status == status)
     else:
-        q = q.filter(LedgerImportRow.review_status.in_(["pending", "confirmed", "duplicate", "invalid"]))
+        q = q.filter(LedgerImportRow.review_status.in_(["pending", "confirmed", "approved", "accepted", "duplicate", "invalid", "rejected", "ignored", "committed"]))
 
     rows = q.order_by(LedgerImportRow.row_index.asc()).all()
     category_ids = {int(x.category_id) for x in rows if x.category_id}
@@ -665,6 +711,7 @@ def review_bulk_set_category(db: Session, role: str, batch_id: int, payload) -> 
         row.review_status = "pending"
         row.review_note = "批量修正分类"
         updated += 1
+    _refresh_batch_metrics(db, batch)
     db.commit()
     return {"updated_count": updated}
 
@@ -693,6 +740,7 @@ def review_bulk_set_merchant(db: Session, role: str, batch_id: int, payload) -> 
         row.review_status = "pending"
         row.review_note = "批量修正商户"
         updated += 1
+    _refresh_batch_metrics(db, batch)
     db.commit()
     return {"updated_count": updated}
 
@@ -707,6 +755,7 @@ def review_bulk_confirm(db: Session, role: str, batch_id: int, payload) -> dict[
         row.review_status = "confirmed"
         row.review_note = (row.review_note or "") + ("; " if row.review_note else "") + "人工确认"
         updated += 1
+    _refresh_batch_metrics(db, batch)
     db.commit()
     return {"updated_count": updated}
 
@@ -721,6 +770,7 @@ def review_reclassify_pending(db: Session, role: str, batch_id: int) -> dict[str
         return {"reclassified_count": 0, "matched_rows": 0, "review_rows": 0}
 
     result = classify_rows(db, role, batch.owner_role, rows)
+    _refresh_batch_metrics(db, batch)
     db.commit()
     return {
         "reclassified_count": len(rows),
@@ -766,6 +816,7 @@ def review_generate_rule(db: Session, role: str, batch_id: int, payload) -> dict
         owner_role=batch.owner_role,
         target_category_name=payload.target_category_name,
         target_subcategory_name=payload.target_subcategory_name,
+        category_type=_infer_category_type_from_rows(rows),
     )
     if rule_kind in {"category", "merchant_and_category"} and not (target_category_id or payload.target_category_id):
         raise AppError("invalid_category", "分类规则必须选择目标分类", status_code=400)
@@ -982,10 +1033,7 @@ def review_generate_rule(db: Session, role: str, batch_id: int, payload) -> dict
         if replay_rows:
             replay_result = classify_rows(db, role, batch.owner_role, replay_rows)
             batch.matched_rows = int(replay_result.get("matched_rows", 0))
-            batch.review_rows = db.query(LedgerImportRow.id).filter(
-                LedgerImportRow.batch_id == batch.id,
-                LedgerImportRow.review_status.in_(["pending", "confirmed", "invalid"]),
-            ).count()
+            _refresh_batch_metrics(db, batch)
             db.commit()
         rows_after = db.query(LedgerImportRow).filter(LedgerImportRow.batch_id == batch.id).order_by(LedgerImportRow.row_index.asc()).all()
         reprocess_result = {
@@ -1051,33 +1099,73 @@ def commit_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]
     if not rows:
         raise AppError("empty_batch", "没有可提交的导入行", status_code=400)
 
-    committed = commit_rows(batch, rows)
+    row_ids = [int(row.id) for row in rows]
+    existing_rows = db.query(LedgerTransaction).filter(
+        LedgerTransaction.is_deleted == False,  # noqa: E712
+        LedgerTransaction.import_row_id.in_(row_ids),
+    ).all()
+    existing_by_row_id = {
+        int(tx.import_row_id): tx
+        for tx in existing_rows
+        if tx.import_row_id is not None
+    }
+
+    committed = commit_rows(batch, rows, existing_transactions_by_row_id=existing_by_row_id)
     transactions = committed["transactions"]
     for tx in transactions:
         db.add(tx)
-
-    db.flush()
-    tx_ids = [int(tx.id) for tx in transactions]
 
     existing_merchants = db.query(LedgerMerchant).filter(
         LedgerMerchant.owner_role == batch.owner_role,
         LedgerMerchant.is_deleted == False,  # noqa: E712
     ).all()
-    touched = upsert_merchant_from_rows(batch.owner_role, rows, existing_merchants)
+    committed_row_ids = set(int(x) for x in committed.get("committed_row_ids", []))
+    idempotent_row_ids = set(int(x) for x in committed.get("idempotent_row_ids", []))
+    touched = upsert_merchant_from_rows(
+        batch.owner_role,
+        rows,
+        existing_merchants,
+        counted_row_ids=committed_row_ids,
+        sync_row_ids=committed_row_ids | idempotent_row_ids,
+    )
     for merchant in touched:
         db.add(merchant)
+    db.flush()
 
-    batch.status = "committed"
-    batch.review_rows = db.query(LedgerImportRow.id).filter(
-        LedgerImportRow.batch_id == batch.id,
-        LedgerImportRow.review_status.in_(["pending", "confirmed", "invalid"]),
-    ).count()
+    merchant_id_by_name = {merchant.canonical_name: merchant.id for merchant in existing_merchants + touched if merchant.canonical_name}
+    for row in rows:
+        if row.review_status != "committed":
+            continue
+        canonical = (row.merchant_normalized or row.merchant_raw or "").strip()
+        if canonical and merchant_id_by_name.get(canonical):
+            row.merchant_id = merchant_id_by_name[canonical]
+    for tx in transactions:
+        source_row = next((row for row in rows if int(row.id) == int(tx.import_row_id or 0)), None)
+        if source_row is not None:
+            tx.merchant_id = source_row.merchant_id
+    for tx in existing_by_row_id.values():
+        source_row = next((row for row in rows if int(row.id) == int(tx.import_row_id or 0)), None)
+        if source_row is not None:
+            tx.merchant_id = source_row.merchant_id
+
+    tx_ids = [
+        int(tx.id)
+        for tx in list(existing_by_row_id.values()) + transactions
+        if tx.import_row_id in committed_row_ids or tx.import_row_id in idempotent_row_ids
+    ]
+
+    _refresh_batch_metrics(db, batch)
+    if committed_row_ids or idempotent_row_ids:
+        batch.status = "committed"
 
     db.commit()
 
     return {
+        "committed_count": int(committed["committed_count"]),
         "created_count": int(committed["created_count"]),
         "skipped_count": int(committed["skipped_count"]),
+        "failed_count": int(committed["failed_count"]),
+        "errors": committed["errors"],
         "transaction_ids": tx_ids,
     }
 

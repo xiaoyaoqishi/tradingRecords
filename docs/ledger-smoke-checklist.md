@@ -12,15 +12,15 @@
 1. Open `/ledger/`, should redirect to `/ledger/imports`.
 2. In Import Center (`/ledger/imports`):
    - Upload `csv/xls/xlsx` file and create a new batch.
-   - Run `parse -> classify -> dedupe` from row actions.
-   - Note: duplicate tagging is currently disabled by default, duplicate count may stay `0`.
+   - Run `parse -> classify -> 清理重复标记` from row actions.
+   - Note: duplicate tagging is currently disabled by default, so this step only clears old duplicate flags and duplicate count may stay `0`.
    - Confirm batch list columns are visible: file/source/status/total/pending/duplicate/confirmed.
 3. Click "进入校对台" and open `/ledger/imports/{id}/review`:
    - Table shows: date/amount/raw text/source/platform/merchant/category/confidence.
    - Source/platform/category/status display labels should be Chinese (no raw enum values like `wechat` / `wechat_pay` / `alipay` in table columns).
    - Header dropdown filters for summary/source/platform/merchant/category are available, sorted by frequency and showing counts.
 4. In review workbench:
-   - Filter pending and duplicate by status tabs.
+   - Filter pending and unrecognized by status tabs.
    - Use table header filters and verify fuzzy search in dropdown options.
    - Adjust high-confidence threshold and click `一键确认高阈值`, verify pending rows are batch-confirmed.
    - Select one or more unresolved rows, click `从勾选记录生成规则`.
@@ -55,4 +55,4 @@
 ## Current Scope / Not In This Phase
 - This phase does not include AI fallback enhancement.
 - This phase does not include analytics/report pages refactor.
-- Legacy ledger pages are downgraded and no longer primary entry.
+- Ledger keeps only the import-batch canonical flow; legacy accounts / transactions / recurring pages are removed.

@@ -92,7 +92,7 @@ export default function ImportBatchesPage() {
     uploaded: '已上传',
     parsed: '已解析',
     classified: '已分类',
-    deduped: '已去重',
+    deduped: '已清理重复标记',
     committed: '已提交',
   }
 
@@ -100,7 +100,7 @@ export default function ImportBatchesPage() {
     <Space direction="vertical" style={{ width: '100%' }} size={12}>
       <PageHeader
         title="导入中心"
-        subtitle="以批次推进：上传 -> 解析 -> 分类 -> 去重 -> 校对确认 -> 提交入账"
+        subtitle="以批次推进：上传 -> 解析 -> 分类 -> 清理重复标记 -> 复核确认 -> 提交入账"
         extra={<BatchToolbar loading={loading} onRefresh={load} onUpload={async (file) => {
           setLoading(true)
           try {
@@ -113,7 +113,7 @@ export default function ImportBatchesPage() {
         }} />}
       />
 
-      <Alert type="info" showIcon message="提交入账仅导入已确认行，请先进入校对台完成确认。" />
+      <Alert type="info" showIcon message="提交入账仅导入已确认行；“清理重复标记”不会执行真实重复检测，只会复位已有重复标记。" />
 
       {errorMessage ? <Alert type="error" showIcon message={errorMessage} /> : null}
 
@@ -147,7 +147,7 @@ export default function ImportBatchesPage() {
                   <Button type="link" onClick={() => navigate(`/imports/${row.id}/review`)}>进入校对台</Button>
                   <Button type="link" onClick={() => parseAndRecognize(row.id)}>解析并识别</Button>
                   <Button type="link" onClick={() => triggerStep(row.id, classifyImportBatch, '分类')}>分类</Button>
-                  <Button type="link" onClick={() => triggerStep(row.id, dedupeImportBatch, '去重')}>去重</Button>
+                  <Button type="link" onClick={() => triggerStep(row.id, dedupeImportBatch, '清理重复标记')}>清理重复标记</Button>
                   <Button type="link" onClick={() => triggerStep(row.id, reprocessImportBatch, '重算识别')}>重算识别</Button>
                   <Button
                     type="link"

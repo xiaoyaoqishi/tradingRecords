@@ -1,12 +1,15 @@
-﻿import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, DatePicker, Input, message, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import dayjs from 'dayjs';
+import { Alert, Badge, Button, Card, DatePicker, Empty, Input, message, Modal, Popconfirm, Progress, Select, Space, Switch, Table, Tag, Typography } from 'antd';
 import {
   DesktopOutlined,
   FileSearchOutlined,
   GlobalOutlined,
   LogoutOutlined,
+  ReloadOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { authApi, monitorApi, userAdminApi, auditApi } from './api';
 
 const POLL_MS = 3000;
@@ -17,6 +20,52 @@ const MODULE_OPTIONS = [
 ];
 const DEFAULT_MODULES = MODULE_OPTIONS.map((x) => x.value);
 const DEFAULT_DATA_PERMISSIONS = { trading: 'read_write', notes: 'read_write', ledger: 'read_write' };
+const EMPTY_FILTERS = {
+  username: '',
+  module: '',
+  event_type: '',
+  keyword: '',
+  date_from: '',
+  date_to: '',
+};
+const { Paragraph } = Typography;
+
+function getUsageLevel(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '暂无数据';
+  if (value < 60) return '正常';
+  if (value < 80) return '偏高';
+  return '危险';
+}
+
+function getUsageColor(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '#94a3b8';
+  if (value < 60) return '#4f8a5b';
+  if (value < 80) return '#c48a36';
+  return '#c45c5c';
+}
+
+function formatPercent(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '暂无数据';
+  return `${Math.round(value)}%`;
+}
+
+function formatTime(value) {
+  if (!value) return '--';
+  if (typeof value === 'string' && /^\d{2}:\d{2}:\d{2}$/.test(value)) return value;
+  const parsed = dayjs(value);
+  if (!parsed.isValid()) return String(value);
+  return parsed.format('YYYY-MM-DD HH:mm:ss');
+}
+
+function formatDuration(seconds) {
+  if (typeof seconds !== 'number' || Number.isNaN(seconds) || seconds < 0) return '暂无数据';
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}天 ${hours}小时 ${minutes}分钟`;
+  if (hours > 0) return `${hours}小时 ${minutes}分钟`;
+  return `${minutes}分钟`;
+}
 
 function useAdminGuard() {
   const [ready, setReady] = useState(false);
@@ -48,70 +97,301 @@ function useAdminGuard() {
 }
 
 function ServerPanel() {
+  const mountedRef = useRef(false);
   const [data, setData] = useState(null);
   const [history, setHistory] = useState([]);
+  const [error, setError] = useState({ realtime: '', history: '' });
+  const [lastRefreshAt, setLastRefreshAt] = useState('');
+  const [online, setOnline] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const pushHistoryRow = (next) => {
+    const row = {
+      ts: next?.sampled_at ? dayjs(next.sampled_at).format('HH:mm:ss') : new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      cpu: Number(next?.cpu?.percent || 0),
+      mem: Number(next?.memory?.percent || 0),
+    };
+    setHistory((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.ts === row.ts && last.cpu === row.cpu && last.mem === row.mem) return prev;
+      const out = [...prev, row];
+      return out.length > 180 ? out.slice(-180) : out;
+    });
+  };
+
+  const loadHistory = async () => {
+    try {
+      const res = await monitorApi.history();
+      if (!mountedRef.current) return;
+      setHistory(Array.isArray(res.data) ? res.data : []);
+      setError((prev) => ({ ...prev, history: '' }));
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setError((prev) => ({ ...prev, history: '最近采样加载失败，请稍后重试。' }));
+    }
+  };
+
+  const loadRealtime = async () => {
+    try {
+      const res = await monitorApi.realtime();
+      if (!mountedRef.current) return;
+      const next = res.data || {};
+      setData(next);
+      setOnline(true);
+      setLastRefreshAt(next.sampled_at || next.system?.time || new Date().toISOString());
+      setError((prev) => ({ ...prev, realtime: '' }));
+      pushHistoryRow(next);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setOnline(false);
+      setError((prev) => ({ ...prev, realtime: '实时状态获取失败，正在继续自动轮询。' }));
+    }
+  };
+
+  const loadAll = async ({ withSpinner = false } = {}) => {
+    if (withSpinner) setRefreshing(true);
+    try {
+      await Promise.allSettled([loadHistory(), loadRealtime()]);
+    } finally {
+      if (mountedRef.current) setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    let timer = null;
-    let mounted = true;
-    monitorApi
-      .history()
-      .then((res) => {
-        if (mounted) setHistory(Array.isArray(res.data) ? res.data : []);
-      })
-      .catch(() => {});
-
-    const poll = () => {
-      monitorApi
-        .realtime()
-        .then((res) => {
-          if (!mounted) return;
-          const next = res.data || {};
-          setData(next);
-          setHistory((prev) => {
-            const row = {
-              ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-              cpu: next?.cpu?.percent || 0,
-              mem: next?.memory?.percent || 0,
-            };
-            const out = [...prev, row];
-            return out.length > 180 ? out.slice(-180) : out;
-          });
-        })
-        .catch(() => {});
-    };
-
-    poll();
-    timer = setInterval(poll, POLL_MS);
+    mountedRef.current = true;
+    loadAll();
+    const timer = setInterval(() => {
+      loadRealtime();
+    }, POLL_MS);
     return () => {
-      mounted = false;
-      if (timer) clearInterval(timer);
+      mountedRef.current = false;
+      clearInterval(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!data) return <Card>加载服务器监控中...</Card>;
+  const trendData = useMemo(
+    () =>
+      history.slice(-30).map((item, index) => ({
+        key: `${item.ts || index}-${index}`,
+        ts: formatTime(item.ts),
+        cpu: Number(item.cpu || 0),
+        mem: Number(item.mem || 0),
+      })),
+    [history]
+  );
+
+  const cpuPercent = typeof data?.cpu?.percent === 'number' ? data.cpu.percent : null;
+  const memoryPercent = typeof data?.memory?.percent === 'number' ? data.memory.percent : null;
+  const diskPercent = typeof data?.disk_percent === 'number'
+    ? data.disk_percent
+    : typeof data?.disk?.partitions?.[0]?.percent === 'number'
+      ? data.disk.partitions[0].percent
+      : null;
+  const loadRatioPercent =
+    typeof data?.load_avg?.['1m'] === 'number' && Number(data?.cpu?.cores_logical || 0) > 0
+      ? (data.load_avg['1m'] / Number(data.cpu.cores_logical)) * 100
+      : typeof data?.cpu?.load_1 === 'number' && Number(data?.cpu?.cores_logical || 0) > 0
+        ? (data.cpu.load_1 / Number(data.cpu.cores_logical)) * 100
+        : null;
+
+  const metricItems = [
+    {
+      key: 'cpu',
+      title: 'CPU 使用率',
+      value: formatPercent(cpuPercent),
+      percent: cpuPercent,
+      note: `逻辑核心 ${data?.cpu?.cores_logical || '--'}，${getUsageLevel(cpuPercent)}运行区间`,
+    },
+    {
+      key: 'memory',
+      title: '内存使用率',
+      value: formatPercent(memoryPercent),
+      percent: memoryPercent,
+      note: data?.memory?.used_fmt && data?.memory?.total_fmt ? `${data.memory.used_fmt} / ${data.memory.total_fmt}` : '暂未返回内存详情',
+    },
+    {
+      key: 'disk',
+      title: '磁盘使用率',
+      value: formatPercent(diskPercent),
+      percent: diskPercent,
+      note:
+        typeof data?.disk_used_gb === 'number' && typeof data?.disk_total_gb === 'number'
+          ? `${data.disk_used_gb.toFixed(1)} GB / ${data.disk_total_gb.toFixed(1)} GB`
+          : '暂无数据',
+    },
+    {
+      key: 'load',
+      title: '系统负载',
+      value:
+        typeof data?.load_avg?.['1m'] === 'number'
+          ? data.load_avg['1m'].toFixed(2)
+          : typeof data?.cpu?.load_1 === 'number'
+            ? data.cpu.load_1.toFixed(2)
+            : '暂无数据',
+      percent: loadRatioPercent,
+      note:
+        typeof data?.load_avg?.['5m'] === 'number' && typeof data?.load_avg?.['15m'] === 'number'
+          ? `5m ${data.load_avg['5m'].toFixed(2)} / 15m ${data.load_avg['15m'].toFixed(2)}`
+          : '暂无数据',
+    },
+  ];
+
+  const sampleColumns = [
+    {
+      title: '时间',
+      dataIndex: 'ts',
+      key: 'ts',
+      render: (value) => formatTime(value),
+    },
+    {
+      title: 'CPU%',
+      dataIndex: 'cpu',
+      key: 'cpu',
+      render: (value) => (
+        <div className="sample-metric-cell">
+          <Progress percent={Math.max(0, Math.min(100, Number(value || 0)))} size="small" strokeColor={getUsageColor(Number(value || 0))} showInfo={false} />
+          <Tag bordered={false} color={getUsageLevel(Number(value || 0)) === '危险' ? 'error' : getUsageLevel(Number(value || 0)) === '偏高' ? 'warning' : 'success'}>
+            {formatPercent(Number(value || 0))}
+          </Tag>
+        </div>
+      ),
+    },
+    {
+      title: '内存%',
+      dataIndex: 'mem',
+      key: 'mem',
+      render: (value) => (
+        <div className="sample-metric-cell">
+          <Progress percent={Math.max(0, Math.min(100, Number(value || 0)))} size="small" strokeColor={getUsageColor(Number(value || 0))} showInfo={false} />
+          <Tag bordered={false} color={getUsageLevel(Number(value || 0)) === '危险' ? 'error' : getUsageLevel(Number(value || 0)) === '偏高' ? 'warning' : 'success'}>
+            {formatPercent(Number(value || 0))}
+          </Tag>
+        </div>
+      ),
+    },
+  ];
+
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={12}>
-      <Card title="系统状态">
-        <div>主机: {data.system?.hostname || '-'}</div>
-        <div>系统: {data.system?.os || '-'}</div>
-        <div>CPU: {data.cpu?.percent || 0}%</div>
-        <div>内存: {data.memory?.percent || 0}%</div>
+    <div className="server-monitor-page">
+      {error.realtime ? <Alert type="error" showIcon message={error.realtime} style={{ marginBottom: 12 }} /> : null}
+      {error.history ? <Alert type="error" showIcon message={error.history} style={{ marginBottom: 12 }} /> : null}
+
+      <Card className="monitor-hero" bordered={false}>
+        <div className="monitor-hero-main">
+          <span className="monitor-hero-kicker">Operations Console</span>
+          <h2>服务器监控</h2>
+          <p>实时查看主机运行状态、资源使用率与最近采样趋势</p>
+        </div>
+        <div className="monitor-hero-actions">
+          <div className="hero-badge-row">
+            <Badge status={online === false ? 'error' : online ? 'success' : 'processing'} text={online === false ? '离线' : online ? '在线' : '连接中'} />
+            <Tag bordered={false} color="blue">
+              自动刷新 {POLL_MS / 1000} 秒
+            </Tag>
+          </div>
+          <div className="hero-meta-item">
+            <span>最近刷新时间</span>
+            <strong>{formatTime(lastRefreshAt || data?.sampled_at || data?.system?.time)}</strong>
+          </div>
+          <Button type="primary" icon={<ReloadOutlined />} loading={refreshing} onClick={() => loadAll({ withSpinner: true })}>
+            手动刷新
+          </Button>
+          <div className="hero-auto-refresh">自动刷新已开启，轮询间隔 {POLL_MS / 1000} 秒。</div>
+        </div>
       </Card>
-      <Card title="最近采样">
+
+      <div className="metric-grid">
+        {metricItems.map((item) => {
+          const level = getUsageLevel(item.percent);
+          const color = getUsageColor(item.percent);
+          return (
+            <Card key={item.key} className="metric-card" bordered={false}>
+              <div className="metric-card-header">
+                <span>{item.title}</span>
+                <Tag bordered={false} color={level === '危险' ? 'error' : level === '偏高' ? 'warning' : level === '正常' ? 'success' : 'default'}>
+                  {level}
+                </Tag>
+              </div>
+              <div className="metric-value" style={{ color }}>
+                {item.value}
+              </div>
+              <Progress percent={typeof item.percent === 'number' ? Math.max(0, Math.min(100, Math.round(item.percent))) : 0} strokeColor={color} showInfo={false} />
+              <div className="metric-subtitle">{item.note}</div>
+            </Card>
+          );
+        })}
+      </div>
+
+      <div className="monitor-main-grid">
+        <Card className="trend-card" title="资源使用趋势" bordered={false}>
+          <div className="chart-card-header">
+            <span>最近 30 条采样中的 CPU / 内存变化</span>
+          </div>
+          <div className="mini-line-chart">
+            {trendData.length ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={trendData} margin={{ top: 8, right: 12, left: -8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#dbe3ec" />
+                  <XAxis dataKey="ts" tick={{ fill: '#66758a', fontSize: 12 }} />
+                  <YAxis domain={[0, 100]} tick={{ fill: '#66758a', fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="cpu" name="CPU" stroke="#4f8a5b" strokeWidth={2.2} dot={false} />
+                  <Line type="monotone" dataKey="mem" name="内存" stroke="#5278a6" strokeWidth={2.2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无采样数据" />
+            )}
+          </div>
+        </Card>
+
+        <Card className="host-info-card" title="主机信息" bordered={false}>
+          <div className="host-info-grid">
+            <div className="host-info-item">
+              <span>主机名</span>
+              <strong>{data?.system?.hostname || '--'}</strong>
+            </div>
+            <div className="host-info-item host-info-item-wide">
+              <span>操作系统</span>
+              <Paragraph ellipsis={{ rows: 2, tooltip: data?.system?.os || '' }}>{data?.system?.os || '--'}</Paragraph>
+            </div>
+            <div className="host-info-item">
+              <span>平台</span>
+              <strong>{data?.platform || '--'}</strong>
+            </div>
+            <div className="host-info-item">
+              <span>架构</span>
+              <strong>{data?.architecture || data?.system?.arch || '--'}</strong>
+            </div>
+            <div className="host-info-item">
+              <span>当前采样时间</span>
+              <strong>{formatTime(data?.sampled_at || data?.system?.time)}</strong>
+            </div>
+            <div className="host-info-item">
+              <span>运行时长</span>
+              <strong>{data?.system?.uptime || formatDuration(data?.uptime_seconds || data?.system?.uptime_seconds)}</strong>
+            </div>
+            <div className="host-info-item host-info-item-wide">
+              <span>系统字符串</span>
+              <Paragraph ellipsis={{ rows: 2, tooltip: data?.system?.kernel || '' }}>{data?.system?.kernel || '--'}</Paragraph>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <Card className="sample-table-card" title="最近采样明细" bordered={false}>
         <Table
           rowKey={(row) => `${row.ts}-${row.cpu}-${row.mem}`}
           dataSource={[...history].reverse().slice(0, 20)}
           size="small"
           pagination={false}
-          columns={[
-            { title: '时间', dataIndex: 'ts', key: 'ts' },
-            { title: 'CPU%', dataIndex: 'cpu', key: 'cpu' },
-            { title: '内存%', dataIndex: 'mem', key: 'mem' },
-          ]}
+          columns={sampleColumns}
+          locale={{ emptyText: '暂无采样数据' }}
         />
       </Card>
-    </Space>
+    </div>
   );
 }
 
@@ -177,6 +457,15 @@ function SitePanel() {
             onChange={(e) => setForm((s) => ({ ...s, timeout_sec: Number(e.target.value || 8) }))}
             style={{ width: 110 }}
           />
+          <Space size={6}>
+            <span>启用</span>
+            <Switch
+              checked={!!form.enabled}
+              checkedChildren="启用"
+              unCheckedChildren="停用"
+              onChange={(checked) => setForm((s) => ({ ...s, enabled: checked }))}
+            />
+          </Space>
           <Button type="primary" onClick={submit}>
             {editing ? '保存' : '创建'}
           </Button>
@@ -203,7 +492,12 @@ function SitePanel() {
             { title: '名称', dataIndex: 'name', key: 'name' },
             { title: 'URL', dataIndex: 'url', key: 'url' },
             {
-              title: '状态',
+              title: '启用',
+              key: 'enabled',
+              render: (_, r) => <Tag color={r.enabled ? 'green' : 'red'}>{r.enabled ? '启用' : '停用'}</Tag>,
+            },
+            {
+              title: '巡检',
               key: 'status',
               render: (_, r) => (
                 <Tag color={r.last_ok ? 'green' : r.last_ok === false ? 'red' : 'default'}>
@@ -218,6 +512,16 @@ function SitePanel() {
               key: 'op',
               render: (_, r) => (
                 <Space>
+                  <Button
+                    size="small"
+                    onClick={async () => {
+                      await monitorApi.updateSite(r.id, { enabled: !r.enabled });
+                      message.success(r.enabled ? '已停用站点' : '已启用站点');
+                      await load();
+                    }}
+                  >
+                    {r.enabled ? '停用' : '启用'}
+                  </Button>
                   <Button
                     size="small"
                     onClick={() => {
@@ -337,7 +641,9 @@ function UserPanel() {
             {
               title: '状态',
               key: 'status',
-              render: (_, r) => <Tag color={r.is_active ? 'green' : 'red'}>{r.is_active ? '启用' : '停用'}</Tag>,
+              render: (_, r) => {
+                return <Tag color={r.is_active ? 'green' : 'red'}>{r.is_active ? '启用' : '停用'}</Tag>;
+              },
             },
             {
               title: '操作',
@@ -489,27 +795,21 @@ function AuditPanel() {
   const [size, setSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
-  const [filters, setFilters] = useState({
-    username: '',
-    module: '',
-    event_type: '',
-    keyword: '',
-    date_from: '',
-    date_to: '',
-  });
+  const [filters, setFilters] = useState({ ...EMPTY_FILTERS });
 
   const load = async (next = {}) => {
     const nextPage = next.page ?? page;
     const nextSize = next.size ?? size;
+    const nextFilters = next.filters ?? filters;
     setLoading(true);
     try {
       const params = { page: nextPage, size: nextSize };
-      if (filters.username.trim()) params.username = filters.username.trim();
-      if (filters.module.trim()) params.module = filters.module.trim();
-      if (filters.event_type) params.event_type = filters.event_type;
-      if (filters.keyword.trim()) params.keyword = filters.keyword.trim();
-      if (filters.date_from) params.date_from = filters.date_from;
-      if (filters.date_to) params.date_to = filters.date_to;
+      if (nextFilters.username.trim()) params.username = nextFilters.username.trim();
+      if (nextFilters.module.trim()) params.module = nextFilters.module.trim();
+      if (nextFilters.event_type) params.event_type = nextFilters.event_type;
+      if (nextFilters.keyword.trim()) params.keyword = nextFilters.keyword.trim();
+      if (nextFilters.date_from) params.date_from = nextFilters.date_from;
+      if (nextFilters.date_to) params.date_to = nextFilters.date_to;
 
       const res = await auditApi.list(params);
       const data = res?.data || {};
@@ -583,8 +883,16 @@ function AuditPanel() {
           onChange={(e) => setFilters((s) => ({ ...s, keyword: e.target.value }))}
           style={{ width: 180 }}
         />
-        <DatePicker placeholder="开始日期" onChange={(_, text) => setFilters((s) => ({ ...s, date_from: text || '' }))} />
-        <DatePicker placeholder="结束日期" onChange={(_, text) => setFilters((s) => ({ ...s, date_to: text || '' }))} />
+        <DatePicker
+          placeholder="开始日期"
+          value={filters.date_from ? dayjs(filters.date_from) : null}
+          onChange={(_, text) => setFilters((s) => ({ ...s, date_from: text || '' }))}
+        />
+        <DatePicker
+          placeholder="结束日期"
+          value={filters.date_to ? dayjs(filters.date_to) : null}
+          onChange={(_, text) => setFilters((s) => ({ ...s, date_to: text || '' }))}
+        />
         <Button
           type="primary"
           onClick={async () => {
@@ -596,9 +904,9 @@ function AuditPanel() {
         </Button>
         <Button
           onClick={async () => {
-            setFilters({ username: '', module: '', event_type: '', keyword: '', date_from: '', date_to: '' });
+            setFilters({ ...EMPTY_FILTERS });
             setPage(1);
-            await load({ page: 1 });
+            await load({ page: 1, filters: EMPTY_FILTERS });
           }}
         >
           重置

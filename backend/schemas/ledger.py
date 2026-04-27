@@ -183,8 +183,11 @@ class LedgerRuleListResponse(BaseModel):
 
 
 class LedgerCommitResponse(BaseModel):
+    committed_count: int
     created_count: int
     skipped_count: int
+    failed_count: int
+    errors: list[dict[str, Any]] = Field(default_factory=list)
     transaction_ids: list[int]
 
 
