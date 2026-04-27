@@ -20,4 +20,4 @@ def health():
     return {"ok": True, "app": settings.app_title, "version": settings.app_version, "db": {"ok": db_ok}}
 
 
-router.add_api_route("/health", health, methods=["GET"])
+router.get("/health")(health)

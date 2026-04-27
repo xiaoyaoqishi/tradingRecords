@@ -7,29 +7,12 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 PROHIBITED_TRADING_PREFIX = "/api" + "/trading"
-
-MIGRATED_ROUTER_FILES = [
-    "backend/routers/monitor.py",
-    "backend/routers/notes.py",
-    "backend/routers/notebook.py",
-    "backend/routers/todo.py",
-    "backend/routers/review.py",
-    "backend/routers/review_sessions.py",
-    "backend/routers/trade_plans.py",
-    "backend/routers/knowledge.py",
-    "backend/routers/trading.py",
-    "backend/routers/ledger.py",
-]
-
-LEGACY_INFRA_ROUTER_FILES = [
-    "backend/routers/auth.py",
-    "backend/routers/admin.py",
-    "backend/routers/audit.py",
-    "backend/routers/health.py",
-    "backend/routers/upload.py",
-    "backend/routers/recycle.py",
-    "backend/routers/poem.py",
-]
+ROUTERS_DIR = ROOT_DIR / "backend/routers"
+ROOT_PREFIX_EXCEPTIONS = {
+    "backend/routers/trading.py": 'APIRouter(prefix="/api", tags=["trading"])',
+    "backend/routers/health.py": None,
+    "backend/routers/upload.py": None,
+}
 
 SKIP_DIR_NAMES = {
     ".git",
@@ -64,38 +47,30 @@ def iter_repo_text_files(root_dir: Path):
 def main() -> int:
     errors: list[str] = []
 
-    for relative_path in MIGRATED_ROUTER_FILES:
-        path = ROOT_DIR / relative_path
-        if not path.exists():
-            errors.append(f"Missing migrated router file: {relative_path}")
+    for path in sorted(ROUTERS_DIR.glob("*.py")):
+        if path.name == "__init__.py":
             continue
-
+        relative_path = path.relative_to(ROOT_DIR).as_posix()
         content = read_text(path)
 
         if ".add_api_route" in content:
             line_no = line_number_for(content, ".add_api_route")
-            errors.append(f"{relative_path}:{line_no}: migrated router must not use add_api_route")
+            errors.append(f"{relative_path}:{line_no}: router must not use add_api_route")
 
         uses_root_api_prefix = 'APIRouter(prefix="/api"' in content
-        if relative_path == "backend/routers/trading.py":
+        expected_root_prefix = ROOT_PREFIX_EXCEPTIONS.get(relative_path)
+
+        if expected_root_prefix is not None:
             if not uses_root_api_prefix:
-                errors.append(
-                    f'{relative_path}: expected compatibility exception APIRouter(prefix="/api", tags=["trading"])'
-                )
-            if 'APIRouter(prefix="/api", tags=["trading"])' not in content:
-                errors.append(
-                    f'{relative_path}: trading compatibility exception must remain APIRouter(prefix="/api", tags=["trading"])'
-                )
+                errors.append(f"{relative_path}: expected root /api compatibility prefix")
+            elif expected_root_prefix not in content:
+                errors.append(f"{relative_path}: compatibility exception must remain {expected_root_prefix}")
+        elif relative_path in ROOT_PREFIX_EXCEPTIONS:
+            if not uses_root_api_prefix:
+                errors.append(f"{relative_path}: expected root /api compatibility prefix")
         elif uses_root_api_prefix:
             line_no = line_number_for(content, 'APIRouter(prefix="/api"')
-            errors.append(f'{relative_path}:{line_no}: migrated router must not use APIRouter(prefix="/api")')
-
-    for relative_path in LEGACY_INFRA_ROUTER_FILES:
-        path = ROOT_DIR / relative_path
-        if not path.exists():
-            errors.append(f"Missing legacy infrastructure router file: {relative_path}")
-            continue
-        print(f"Legacy infrastructure router not yet migrated: {relative_path}")
+            errors.append(f'{relative_path}:{line_no}: router must not use APIRouter(prefix="/api")')
 
     for path in iter_repo_text_files(ROOT_DIR):
         try:
