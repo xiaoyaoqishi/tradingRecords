@@ -10,6 +10,7 @@
 - legacy schema migration，例如补列、兼容旧表、兼容旧鉴权数据。
 - 兼容导出别名，作为历史 import 的兼容层保留。
 - 全局 owner-role helper 与最小 glue。
+- 最小 maintenance glue，例如清理线程启动与相关辅助函数。
 
 ## runtime.py 的禁止事项
 
@@ -33,9 +34,11 @@
 
 ## 历史债务说明
 
-- `runtime.py` 当前上限已下调为 `510` 行，并继续以 `scripts/check_runtime_size.py` 强制守护。
-- `scripts/check_runtime_boundaries.py` 进一步禁止把新的业务风格顶层函数定义写回 `runtime.py`。
-- 当前 `runtime.py` 只应保留 `init_runtime`、legacy migration、compatibility exports、global owner-role helpers 与 minimal glue。
+- `runtime.py` 当前基线为 `510` 行，hard max 为 `550` 行，并继续以 `scripts/check_runtime_size.py` 强制守护。
+- `scripts/check_runtime_size.py` 超过 `510` 行会给出 warning，超过 `550` 行才失败。
+- `scripts/check_runtime_boundaries.py` 当前正式策略为“顶层函数白名单”，不再依赖函数名前缀黑名单。
+- 当前 `runtime.py` 只应保留 `init_runtime`、migration glue、compatibility exports、global owner-role helpers 与 minimal maintenance glue。
+- 不允许在 `runtime.py` 新增未登记顶层函数；如需新增后端业务函数，必须进入对应 `backend/services/*_runtime.py`。
 - auth/admin/audit 运行期逻辑已迁出；后续拆分应单独发起，不要在业务需求顺手继续扩大该文件。
 - review / review_session 运行期逻辑已迁出到 `backend/services/review_runtime.py`，后续新的 review 展示转换、review_session CRUD、trade link 同步与 create-from-selection 逻辑不得写回 `runtime.py`。
 - trade_plan 运行期逻辑已迁出到 `backend/services/trade_plan_runtime.py`，后续新的 plan CRUD、trade link / review-session link 同步与 follow-up review session 逻辑不得写回 `runtime.py`。
