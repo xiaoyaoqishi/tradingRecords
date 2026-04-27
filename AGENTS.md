@@ -45,6 +45,9 @@
 - 后端改动：至少运行相关 `python3 -m pytest -q backend/tests`（或相关子集）。
 - 前端改动：至少运行对应前端的 `npm run build`。
 - portal / deploy / route 改动：需说明入口、刷新、静态资源路径是否正常。
+- 涉及 router/API 注册方式变更时，必须运行：
+  - `python3 scripts/check_router_style.py`
+  - `bash scripts/check_all.sh`
 - 涉及结构、部署、权限、依赖变更时，必须运行相关检查脚本：`scripts/check_deploy.sh`、`scripts/check_naming.sh`、`scripts/check_runtime_size.py`、`scripts/check_all.sh` 中的适用项。
 - 若无法完成真实联调，必须明确说明未验证项，不得假装已验证。
 

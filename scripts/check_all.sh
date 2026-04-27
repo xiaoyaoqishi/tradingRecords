@@ -38,6 +38,8 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+run_step "python3 scripts/check_router_style.py" python3 scripts/check_router_style.py
+
 if python3 -m pytest --version >/dev/null 2>&1; then
   run_step "python3 -m pytest -q backend/tests" python3 -m pytest -q backend/tests
 else
