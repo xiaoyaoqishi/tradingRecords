@@ -7,14 +7,16 @@
 `backend/services/runtime.py` 当前只允许承担以下职责：
 
 - `init_runtime()` 等运行期初始化入口。
-- 历史兼容迁移入口，例如补列、兼容旧表、兼容旧鉴权数据。
-- 仍未拆出的历史导出函数，在重构完成前作为兼容层保留。
+- legacy schema migration，例如补列、兼容旧表、兼容旧鉴权数据。
+- 兼容导出别名，作为历史 import 的兼容层保留。
+- 全局 owner-role helper 与最小 glue。
 
 ## runtime.py 的禁止事项
 
 - 禁止把新的业务逻辑继续堆进 `backend/services/runtime.py`。
 - 禁止在其中新增新的领域规则、复杂查询拼装、写入流程或模块专属 service。
 - 禁止把本应进入 router / domain service / dedicated service 的逻辑，再次回灌到 `runtime.py`。
+- 禁止把新的 CRUD、analytics、import、review、ledger、monitor、notes、trading 业务逻辑写回 `runtime.py`。
 - `monitor` 运行期逻辑已迁出到 `backend/services/monitor_runtime.py`，后续新的 monitor 采样、巡检、系统信息聚合与 monitor 站点管理逻辑不得写回 `runtime.py`。
 - `notes / notebook / todo` 运行期逻辑已迁出到 `backend/services/notes_runtime.py`，后续新的 notes 域查询、笔记链接索引、默认 notebook 初始化、回收站处理与 todo 逻辑不得写回 `runtime.py`。
 - `auth` 运行期逻辑已迁出到 `backend/services/auth_runtime.py`，后续新的认证、登录、登出、setup、鉴权检查与用户权限归一化逻辑不得写回 `runtime.py`。
@@ -32,7 +34,8 @@
 ## 历史债务说明
 
 - `runtime.py` 当前上限已下调为 `510` 行，并继续以 `scripts/check_runtime_size.py` 强制守护。
-- 其中同时存在初始化、兼容迁移和历史业务代码，这种混合状态需要后续单独拆分。
+- `scripts/check_runtime_boundaries.py` 进一步禁止把新的业务风格顶层函数定义写回 `runtime.py`。
+- 当前 `runtime.py` 只应保留 `init_runtime`、legacy migration、compatibility exports、global owner-role helpers 与 minimal glue。
 - auth/admin/audit 运行期逻辑已迁出；后续拆分应单独发起，不要在业务需求顺手继续扩大该文件。
 - review / review_session 运行期逻辑已迁出到 `backend/services/review_runtime.py`，后续新的 review 展示转换、review_session CRUD、trade link 同步与 create-from-selection 逻辑不得写回 `runtime.py`。
 - trade_plan 运行期逻辑已迁出到 `backend/services/trade_plan_runtime.py`，后续新的 plan CRUD、trade link / review-session link 同步与 follow-up review session 逻辑不得写回 `runtime.py`。
@@ -40,3 +43,20 @@
 - poem / upload 小模块运行期逻辑已迁出到 `backend/services/utility_runtime.py`；health 逻辑当前仍在 `backend/routers/health.py` 内联，本轮无需迁出。
 - trading 主域运行期逻辑已迁出到 `backend/services/trading_runtime.py`、`backend/services/trade_import_runtime.py`、`backend/services/trade_analytics_runtime.py`、`backend/services/trade_broker_runtime.py`。
 - 后续新的 trading CRUD、import、analytics、broker、source metadata 与展示 helper 不得写回 `backend/services/runtime.py`，应继续落到对应 dedicated runtime。
+
+## 已完成的 dedicated runtime 拆分
+
+- `backend/services/monitor_runtime.py`
+- `backend/services/notes_runtime.py`
+- `backend/services/auth_runtime.py`
+- `backend/services/admin_runtime.py`
+- `backend/services/audit_runtime.py`
+- `backend/services/recycle_runtime.py`
+- `backend/services/review_runtime.py`
+- `backend/services/trade_plan_runtime.py`
+- `backend/services/knowledge_runtime.py`
+- `backend/services/utility_runtime.py`
+- `backend/services/trading_runtime.py`
+- `backend/services/trade_import_runtime.py`
+- `backend/services/trade_analytics_runtime.py`
+- `backend/services/trade_broker_runtime.py`

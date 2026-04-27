@@ -71,6 +71,7 @@ fi
 run_step "bash scripts/check_naming.sh" bash scripts/check_naming.sh
 run_step "bash scripts/check_deploy.sh" bash scripts/check_deploy.sh
 run_step "python3 scripts/check_runtime_size.py" python3 scripts/check_runtime_size.py
+run_step "python3 scripts/check_runtime_boundaries.py" python3 scripts/check_runtime_boundaries.py
 
 if [[ "$status" -ne 0 ]]; then
   echo "[check_all] result: FAILED"

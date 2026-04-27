@@ -26,6 +26,7 @@ def main() -> int:
     if line_count > MAX_LINES:
         print("[check_runtime_size] FAIL: runtime.py grew beyond the allowed ceiling")
         print("[check_runtime_size] hint: split logic out of backend/services/runtime.py")
+        print("[check_runtime_size] hint: run python3 scripts/check_runtime_boundaries.py for boundary details")
         print("[check_runtime_size] hint: temporary bypass is available via RUNTIME_SIZE_ALLOW_GROWTH=1")
         return 1
 

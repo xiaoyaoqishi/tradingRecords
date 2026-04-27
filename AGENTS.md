@@ -18,6 +18,8 @@
 ## 2. 架构边界
 - 不要把业务逻辑写回 `backend/main.py`。
 - 不要把新的领域逻辑堆进 `backend/services/runtime.py`。
+- `backend/services/runtime.py` 只允许保留启动、迁移、兼容导出和全局 owner-role glue。
+- 涉及 runtime/service 拆分或新增后端业务逻辑时，业务实现必须进入对应 dedicated runtime 文件，不得写回 `backend/services/runtime.py`。
 - Router 负责参数接收、依赖注入和转发；业务逻辑应放在 service。
 - 新增 ledger 能力必须优先放在 ledger 域下，不要混入 trading/notes/monitor。
 - 不要把 ledger 前端页面塞进 `frontend-trading`；ledger 保持在 `frontend-ledger`。
@@ -49,6 +51,9 @@
   - `python3 scripts/check_router_style.py`
   - `bash scripts/check_all.sh`
 - 涉及结构、部署、权限、依赖变更时，必须运行相关检查脚本：`scripts/check_deploy.sh`、`scripts/check_naming.sh`、`scripts/check_runtime_size.py`、`scripts/check_all.sh` 中的适用项。
+- 涉及 runtime/service 拆分或新增后端业务逻辑时，必须运行：
+  - `python3 scripts/check_runtime_boundaries.py`
+  - `bash scripts/check_all.sh`
 - 若无法完成真实联调，必须明确说明未验证项，不得假装已验证。
 
 ## 6. 回复要求
