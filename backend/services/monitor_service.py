@@ -1,9 +1,9 @@
-from services import runtime
+from services import monitor_runtime
 
-realtime = runtime.monitor_realtime
-history = runtime.monitor_history
-list_sites = runtime.monitor_sites
-create_site = runtime.create_monitor_site
-update_site = runtime.update_monitor_site
-delete_site = runtime.delete_monitor_site
-site_results = runtime.monitor_site_results
+realtime = monitor_runtime.monitor_realtime
+history = monitor_runtime.monitor_history
+list_sites = monitor_runtime.monitor_sites
+create_site = monitor_runtime.create_monitor_site
+update_site = monitor_runtime.update_monitor_site
+delete_site = monitor_runtime.delete_monitor_site
+site_results = monitor_runtime.monitor_site_results
