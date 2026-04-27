@@ -14,9 +14,13 @@ import {
 } from '../api/ledger'
 import BatchToolbar from '../components/BatchToolbar'
 import PageHeader from '../components/PageHeader'
+import {
+  COMMITTED_BATCH_READONLY_MESSAGE,
+  COMMIT_ELIGIBLE_REVIEW_STATUSES,
+  REVIEW_STATUSES,
+  isCommittedBatch,
+} from '../constants/ledgerReview'
 import { formatDateTime } from '../utils/date'
-
-const COMMIT_ELIGIBLE_STATUSES = new Set(['confirmed', 'approved', 'accepted'])
 
 function buildCommitResultMessage(payload) {
   return `提交完成：入账 ${Number(payload?.committed_count || 0)}，跳过 ${Number(payload?.skipped_count || 0)}，失败 ${Number(payload?.failed_count || 0)}`
@@ -41,9 +45,9 @@ export default function ImportBatchesPage() {
         items.slice(0, 30).map(async (item) => {
           const review = await listImportReviewRows(item.id)
           const reviewRows = Array.isArray(review?.items) ? review.items : []
-          const committableCount = reviewRows.filter((x) => COMMIT_ELIGIBLE_STATUSES.has(x.review_status)).length
-          const pendingCount = reviewRows.filter((x) => x.review_status === 'pending').length
-          const duplicateCount = reviewRows.filter((x) => x.review_status === 'duplicate').length
+          const committableCount = reviewRows.filter((x) => COMMIT_ELIGIBLE_REVIEW_STATUSES.has(x.review_status)).length
+          const pendingCount = reviewRows.filter((x) => x.review_status === REVIEW_STATUSES.PENDING).length
+          const duplicateCount = reviewRows.filter((x) => x.review_status === REVIEW_STATUSES.DUPLICATE).length
           return [item.id, { committableCount, pendingCount, duplicateCount }]
         }),
       )
@@ -124,6 +128,13 @@ export default function ImportBatchesPage() {
         showIcon
         message="提交入账只会处理 confirmed / approved / accepted 状态；pending / ignored / rejected / duplicate 不会入账。“清理重复标记”不会执行真实重复检测，只会复位已有重复标记。"
       />
+      {rows.some((item) => isCommittedBatch(item)) ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={COMMITTED_BATCH_READONLY_MESSAGE}
+        />
+      ) : null}
 
       {errorMessage ? <Alert type="error" showIcon message={errorMessage} /> : null}
 
@@ -155,13 +166,13 @@ export default function ImportBatchesPage() {
               render: (_, row) => (
                 <Space>
                   <Button type="link" onClick={() => navigate(`/imports/${row.id}/review`)}>进入校对台</Button>
-                  <Button type="link" onClick={() => parseAndRecognize(row.id)}>解析并识别</Button>
-                  <Button type="link" onClick={() => triggerStep(row.id, classifyImportBatch, '分类')}>分类</Button>
-                  <Button type="link" onClick={() => triggerStep(row.id, dedupeImportBatch, '清理重复标记')}>清理重复标记</Button>
-                  <Button type="link" onClick={() => triggerStep(row.id, reprocessImportBatch, '重算识别')}>重算识别</Button>
+                  <Button type="link" disabled={isCommittedBatch(row)} onClick={() => parseAndRecognize(row.id)}>解析并识别</Button>
+                  <Button type="link" disabled={isCommittedBatch(row)} onClick={() => triggerStep(row.id, classifyImportBatch, '分类')}>分类</Button>
+                  <Button type="link" disabled={isCommittedBatch(row)} onClick={() => triggerStep(row.id, dedupeImportBatch, '清理重复标记')}>清理重复标记</Button>
+                  <Button type="link" disabled={isCommittedBatch(row)} onClick={() => triggerStep(row.id, reprocessImportBatch, '重算识别')}>重算识别</Button>
                   <Button
                     type="link"
-                    disabled={!canCommit(row)}
+                    disabled={isCommittedBatch(row) || !canCommit(row)}
                     onClick={async () => {
                       setLoading(true)
                       try {

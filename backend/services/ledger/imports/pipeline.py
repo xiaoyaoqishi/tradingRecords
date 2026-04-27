@@ -15,6 +15,19 @@ from core.config import settings
 from core.errors import AppError
 from models import LedgerCategory, LedgerImportBatch, LedgerImportRow, LedgerMerchant, LedgerRule, LedgerTransaction
 from services.ledger import apply_owner_scope, ensure_row_visible, owner_role_for_create
+from services.ledger.constants import (
+    CONFIRMED_REVIEW_STATUS,
+    COMMIT_ELIGIBLE_REVIEW_STATUSES,
+    COMMITTED_BATCH_READONLY_MESSAGE,
+    COMMITTED_BATCH_STATUS,
+    COMMITTED_REVIEW_STATUS,
+    DUPLICATE_REVIEW_STATUS,
+    FINAL_REVIEW_STATUSES,
+    INVALID_REVIEW_STATUS,
+    PENDING_REVIEW_STATUS,
+    REPROCESSABLE_UNCONFIRMED_REVIEW_STATUSES,
+    VISIBLE_REVIEW_STATUSES,
+)
 from services.ledger.imports.deduper import build_duplicate_key, classify_duplicate
 from services.ledger.imports.normalizers import normalize_row_payload
 from services.ledger.imports.parsers import decode_bytes, parse_rows
@@ -96,11 +109,13 @@ def _refresh_batch_metrics(db: Session, batch: LedgerImportBatch) -> None:
     batch.matched_rows = sum(
         1
         for review_status, category_id, confidence, _duplicate_type in rows
-        if category_id is not None and float(confidence or 0.0) >= 0.7 and review_status != "duplicate"
+        if category_id is not None and float(confidence or 0.0) >= 0.7 and review_status != DUPLICATE_REVIEW_STATUS
     )
-    batch.review_rows = sum(1 for review_status, _category_id, _confidence, _duplicate_type in rows if review_status != "committed")
+    batch.review_rows = sum(
+        1 for review_status, _category_id, _confidence, _duplicate_type in rows if review_status != COMMITTED_REVIEW_STATUS
+    )
     batch.duplicate_rows = sum(
-        1 for review_status, _category_id, _confidence, duplicate_type in rows if review_status == "duplicate" or duplicate_type
+        1 for review_status, _category_id, _confidence, duplicate_type in rows if review_status == DUPLICATE_REVIEW_STATUS or duplicate_type
     )
 
 
@@ -173,6 +188,16 @@ def _resolve_rows(db: Session, role: str, batch: LedgerImportBatch, row_ids: lis
     if len(rows) != len(set(row_ids)):
         raise AppError("invalid_row_ids", "存在无效 row_id", status_code=400)
     return rows
+
+
+def _ensure_batch_mutable(batch: LedgerImportBatch, action: str) -> None:
+    if str(batch.status or "").strip().lower() != COMMITTED_BATCH_STATUS:
+        return
+    raise AppError(
+        "batch_already_committed",
+        f"{action}不可执行。{COMMITTED_BATCH_READONLY_MESSAGE}",
+        status_code=409,
+    )
 
 
 def _resolve_rule(db: Session, role: str, rule_id: int) -> LedgerRule:
@@ -466,6 +491,7 @@ def delete_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]
 
 def parse_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]:
     batch = _resolve_batch(db, role, batch_id)
+    _ensure_batch_mutable(batch, "该批次已入账后重新解析")
     file_path = Path(batch.file_path)
     if not file_path.exists():
         raise AppError("batch_file_not_found", "导入文件不存在", status_code=404)
@@ -543,6 +569,7 @@ def parse_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]:
 
 def classify_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]:
     batch = _resolve_batch(db, role, batch_id)
+    _ensure_batch_mutable(batch, "该批次已入账后重新分类")
 
     rows = db.query(LedgerImportRow).filter(LedgerImportRow.batch_id == batch.id).order_by(LedgerImportRow.row_index.asc()).all()
     if not rows:
@@ -562,6 +589,7 @@ def classify_import_batch(db: Session, role: str, batch_id: int) -> dict[str, An
 
 def reprocess_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]:
     batch = _resolve_batch(db, role, batch_id)
+    _ensure_batch_mutable(batch, "该批次已入账后重算识别")
     rows = db.query(LedgerImportRow).filter(LedgerImportRow.batch_id == batch.id).order_by(LedgerImportRow.row_index.asc()).all()
     if not rows:
         raise AppError("empty_batch", "当前批次没有可重算的行，请先解析", status_code=400)
@@ -601,6 +629,7 @@ def _basis_for_row(row: LedgerImportRow) -> dict[str, Any]:
 
 def dedupe_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]:
     batch = _resolve_batch(db, role, batch_id)
+    _ensure_batch_mutable(batch, "该批次已入账后清理重复标记")
     rows = db.query(LedgerImportRow).filter(LedgerImportRow.batch_id == batch.id).order_by(LedgerImportRow.row_index.asc()).all()
     if not rows:
         raise AppError("empty_batch", "当前批次没有可去重的行", status_code=400)
@@ -611,8 +640,8 @@ def dedupe_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]
         row.duplicate_type = None
         row.duplicate_score = 0.0
         row.duplicate_basis_json = _json_dump({})
-        if row.review_status == "duplicate":
-            row.review_status = "pending"
+        if row.review_status == DUPLICATE_REVIEW_STATUS:
+            row.review_status = PENDING_REVIEW_STATUS
 
     _refresh_batch_metrics(db, batch)
     batch.status = "deduped"
@@ -628,7 +657,7 @@ def list_review_rows(db: Session, role: str, batch_id: int, status: Optional[str
     if status:
         q = q.filter(LedgerImportRow.review_status == status)
     else:
-        q = q.filter(LedgerImportRow.review_status.in_(["pending", "confirmed", "approved", "accepted", "duplicate", "invalid", "rejected", "ignored", "committed"]))
+        q = q.filter(LedgerImportRow.review_status.in_(VISIBLE_REVIEW_STATUSES))
 
     rows = q.order_by(LedgerImportRow.row_index.asc()).all()
     category_ids = {int(x.category_id) for x in rows if x.category_id}
@@ -657,7 +686,13 @@ def get_review_insights(db: Session, role: str, batch_id: int) -> dict[str, Any]
     batch = _resolve_batch(db, role, batch_id)
     rows = db.query(LedgerImportRow).filter(
         LedgerImportRow.batch_id == batch.id,
-        LedgerImportRow.review_status.in_(["pending", "confirmed", "invalid"]),
+        LedgerImportRow.review_status.in_(
+            [
+                PENDING_REVIEW_STATUS,
+                *COMMIT_ELIGIBLE_REVIEW_STATUSES,
+                INVALID_REVIEW_STATUS,
+            ]
+        ),
     ).all()
 
     merchant_group: dict[str, dict[str, Any]] = defaultdict(lambda: {"count": 0, "amount_sum": 0.0, "row_ids": []})
@@ -698,14 +733,15 @@ def get_review_insights(db: Session, role: str, batch_id: int) -> dict[str, Any]
 
 def review_bulk_set_category(db: Session, role: str, batch_id: int, payload) -> dict[str, Any]:
     batch = _resolve_batch(db, role, batch_id)
+    _ensure_batch_mutable(batch, "该批次已入账后批量修正分类")
     rows = _resolve_rows(db, role, batch, payload.row_ids)
     updated = 0
     for row in rows:
-        if row.review_status == "duplicate":
+        if row.review_status == DUPLICATE_REVIEW_STATUS:
             continue
         row.category_id = int(payload.category_id)
         row.subcategory_id = int(payload.subcategory_id) if payload.subcategory_id else None
-        row.review_status = "pending"
+        row.review_status = PENDING_REVIEW_STATUS
         row.review_note = "批量修正分类"
         updated += 1
     _refresh_batch_metrics(db, batch)
@@ -715,6 +751,7 @@ def review_bulk_set_category(db: Session, role: str, batch_id: int, payload) -> 
 
 def review_bulk_set_merchant(db: Session, role: str, batch_id: int, payload) -> dict[str, Any]:
     batch = _resolve_batch(db, role, batch_id)
+    _ensure_batch_mutable(batch, "该批次已入账后批量修正商户")
     rows = _resolve_rows(db, role, batch, payload.row_ids)
     updated = 0
     merchant_name = payload.merchant_normalized.strip()
@@ -730,11 +767,11 @@ def review_bulk_set_merchant(db: Session, role: str, batch_id: int, payload) -> 
         db.flush()
 
     for row in rows:
-        if row.review_status == "duplicate":
+        if row.review_status == DUPLICATE_REVIEW_STATUS:
             continue
         row.merchant_normalized = merchant_name
         row.merchant_id = merchant.id
-        row.review_status = "pending"
+        row.review_status = PENDING_REVIEW_STATUS
         row.review_note = "批量修正商户"
         updated += 1
     _refresh_batch_metrics(db, batch)
@@ -744,12 +781,13 @@ def review_bulk_set_merchant(db: Session, role: str, batch_id: int, payload) -> 
 
 def review_bulk_confirm(db: Session, role: str, batch_id: int, payload) -> dict[str, Any]:
     batch = _resolve_batch(db, role, batch_id)
+    _ensure_batch_mutable(batch, "该批次已入账后批量确认")
     rows = _resolve_rows(db, role, batch, payload.row_ids)
     updated = 0
     for row in rows:
-        if row.review_status in {"duplicate", "invalid", "committed"}:
+        if row.review_status in FINAL_REVIEW_STATUSES:
             continue
-        row.review_status = "confirmed"
+        row.review_status = CONFIRMED_REVIEW_STATUS
         row.review_note = (row.review_note or "") + ("; " if row.review_note else "") + "人工确认"
         updated += 1
     _refresh_batch_metrics(db, batch)
@@ -759,9 +797,10 @@ def review_bulk_confirm(db: Session, role: str, batch_id: int, payload) -> dict[
 
 def review_reclassify_pending(db: Session, role: str, batch_id: int) -> dict[str, Any]:
     batch = _resolve_batch(db, role, batch_id)
+    _ensure_batch_mutable(batch, "该批次已入账后对待确认重新识别")
     rows = db.query(LedgerImportRow).filter(
         LedgerImportRow.batch_id == batch.id,
-        LedgerImportRow.review_status == "pending",
+        LedgerImportRow.review_status == PENDING_REVIEW_STATUS,
     ).order_by(LedgerImportRow.row_index.asc()).all()
     if not rows:
         return {"reclassified_count": 0, "matched_rows": 0, "review_rows": 0}
@@ -778,6 +817,8 @@ def review_reclassify_pending(db: Session, role: str, batch_id: int) -> dict[str
 
 def review_generate_rule(db: Session, role: str, batch_id: int, payload) -> dict[str, Any]:
     batch = _resolve_batch(db, role, batch_id)
+    if not payload.preview_only:
+        _ensure_batch_mutable(batch, "该批次已入账后生成规则或重识别")
     rows = _resolve_rows(db, role, batch, payload.row_ids)
     all_rows = db.query(LedgerImportRow).filter(LedgerImportRow.batch_id == batch.id).order_by(LedgerImportRow.row_index.asc()).all()
     unrecognized_before = _count_unrecognized(all_rows)
@@ -1024,7 +1065,7 @@ def review_generate_rule(db: Session, role: str, batch_id: int, payload) -> dict
             replay_scope = "unconfirmed"
         replay_q = db.query(LedgerImportRow).filter(LedgerImportRow.batch_id == batch.id)
         if replay_scope == "unconfirmed":
-            replay_q = replay_q.filter(LedgerImportRow.review_status != "confirmed")
+            replay_q = replay_q.filter(LedgerImportRow.review_status.in_(REPROCESSABLE_UNCONFIRMED_REVIEW_STATUSES))
         replay_rows = replay_q.order_by(LedgerImportRow.row_index.asc()).all()
         replay_result = {"matched_rows": 0, "review_rows": 0}
         if replay_rows:
@@ -1132,16 +1173,12 @@ def commit_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]
 
     merchant_id_by_name = {merchant.canonical_name: merchant.id for merchant in existing_merchants + touched if merchant.canonical_name}
     for row in rows:
-        if row.review_status != "committed":
+        if row.review_status != COMMITTED_REVIEW_STATUS:
             continue
         canonical = (row.merchant_normalized or row.merchant_raw or "").strip()
         if canonical and merchant_id_by_name.get(canonical):
             row.merchant_id = merchant_id_by_name[canonical]
     for tx in transactions:
-        source_row = row_by_id.get(int(tx.import_row_id or 0))
-        if source_row is not None:
-            tx.merchant_id = source_row.merchant_id
-    for tx in existing_by_row_id.values():
         source_row = row_by_id.get(int(tx.import_row_id or 0))
         if source_row is not None:
             tx.merchant_id = source_row.merchant_id
@@ -1154,7 +1191,7 @@ def commit_import_batch(db: Session, role: str, batch_id: int) -> dict[str, Any]
 
     _refresh_batch_metrics(db, batch)
     if committed_row_ids or idempotent_row_ids:
-        batch.status = "committed"
+        batch.status = COMMITTED_BATCH_STATUS
 
     db.commit()
 

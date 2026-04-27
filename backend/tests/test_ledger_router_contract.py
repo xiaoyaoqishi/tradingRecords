@@ -89,3 +89,10 @@ def test_ledger_router_public_routes_match_current_canonical_handlers():
         "analytics_monthly_trend",
         "analytics_unrecognized_breakdown",
     }
+
+
+def test_ledger_router_does_not_expose_legacy_paths():
+    paths = {route.path for route in router.routes}
+    assert "/api/ledger/accounts" not in paths
+    assert "/api/ledger/transactions" not in paths
+    assert "/api/ledger/recurring" not in paths

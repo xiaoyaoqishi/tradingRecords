@@ -55,7 +55,7 @@
 - Review workbench hardening: batch selection, replay rules for the current batch, reclassify pending rows, and a table-top action toolbar for refresh/replay/commit.
 - Review workbench supports configurable high-confidence threshold and one-click confirm for high-confidence pending rows.
 - Rule generation hardening: hit-range preview and estimated impact, duplicate-rule skipping, and scope choice between profile-bound and global.
-- Commit only imports `confirmed` rows and keeps batch/row/transaction linkage.
+- Commit only imports `confirmed` / `approved` / `accepted` rows and keeps batch/row/transaction linkage.
 - Imported datetime is normalized to date-only precision (`YYYY-MM-DD`, no time part).
 - Merchant dictionary (`ledger_merchants`) supports editing canonical name/aliases/default categories and displays recent linked samples.
 - Unified tabular parser supports `csv/xls/xlsx` (including HTML-table style `.xls` exports).

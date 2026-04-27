@@ -1,4 +1,5 @@
 import { Descriptions, Divider, Drawer, Tag, Typography } from 'antd'
+import { REVIEW_STATUS_META } from '../constants/ledgerReview'
 
 function displayOrPending(value) {
   const text = String(value ?? '').trim()
@@ -6,28 +7,6 @@ function displayOrPending(value) {
 }
 
 export default function ReviewDetailPanel({ open, row, onClose }) {
-  const statusLabel = {
-    pending: '待确认',
-    confirmed: '已确认',
-    approved: '已批准',
-    accepted: '已接受',
-    duplicate: '重复',
-    ignored: '已忽略',
-    rejected: '已拒绝',
-    invalid: '无效',
-    committed: '已入账',
-  }
-  const statusColor = {
-    pending: 'blue',
-    confirmed: 'green',
-    approved: 'green',
-    accepted: 'green',
-    duplicate: 'orange',
-    ignored: 'default',
-    rejected: 'red',
-    invalid: 'red',
-    committed: 'cyan',
-  }
   const duplicateLabel = {
     exact_duplicate: '完全重复',
     probable_duplicate: '高疑似重复',
@@ -45,8 +24,8 @@ export default function ReviewDetailPanel({ open, row, onClose }) {
         <>
           <Descriptions column={1} size="small" bordered>
             <Descriptions.Item label="校对状态">
-              <Tag color={statusColor[row.review_status] || 'blue'}>
-                {statusLabel[row.review_status] || row.review_status}
+              <Tag color={REVIEW_STATUS_META[row.review_status]?.color || 'blue'}>
+                {REVIEW_STATUS_META[row.review_status]?.label || row.review_status}
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="重复类型">{duplicateLabel[row.duplicate_type] || row.duplicate_type || '-'}</Descriptions.Item>

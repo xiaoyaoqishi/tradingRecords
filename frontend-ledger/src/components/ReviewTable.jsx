@@ -1,4 +1,5 @@
 import { Button, Space, Table, Tag } from 'antd'
+import { REVIEW_STATUS_META } from '../constants/ledgerReview'
 import { formatDate } from '../utils/date'
 
 function unresolved(text = '待识别') {
@@ -11,18 +12,7 @@ function displayOrPending(value) {
 }
 
 function reviewStatusMeta(status) {
-  const map = {
-    pending: { label: '待确认', color: 'blue' },
-    confirmed: { label: '已确认', color: 'green' },
-    approved: { label: '已批准', color: 'green' },
-    accepted: { label: '已接受', color: 'green' },
-    ignored: { label: '已忽略', color: 'default' },
-    rejected: { label: '已拒绝', color: 'red' },
-    duplicate: { label: '重复标记', color: 'orange' },
-    invalid: { label: '无效', color: 'red' },
-    committed: { label: '已入账', color: 'cyan' },
-  }
-  return map[status] || { label: status || '-', color: 'default' }
+  return REVIEW_STATUS_META[status] || { label: status || '-', color: 'default' }
 }
 
 export default function ReviewTable({

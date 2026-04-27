@@ -4,11 +4,10 @@ import json
 from typing import Any
 
 from models import LedgerImportBatch, LedgerImportRow, LedgerMerchant, LedgerTransaction
+from services.ledger.constants import COMMIT_ELIGIBLE_REVIEW_STATUSES, COMMITTED_REVIEW_STATUS, INVALID_REVIEW_STATUS
 
-COMMIT_ELIGIBLE_STATUSES = {"confirmed", "approved", "accepted"}
 
-
-def sync_transaction_from_row(tx: LedgerTransaction, batch: LedgerImportBatch, row: LedgerImportRow) -> LedgerTransaction:
+def build_transaction_from_row(tx: LedgerTransaction, batch: LedgerImportBatch, row: LedgerImportRow) -> LedgerTransaction:
     tx.batch_id = batch.id
     tx.import_row_id = row.id
     tx.account_id = row.account_id
@@ -35,6 +34,13 @@ def sync_transaction_from_row(tx: LedgerTransaction, batch: LedgerImportBatch, r
     return tx
 
 
+def sync_existing_transaction_linkage(tx: LedgerTransaction, batch: LedgerImportBatch, row: LedgerImportRow) -> LedgerTransaction:
+    tx.batch_id = batch.id
+    tx.import_row_id = row.id
+    tx.owner_role = batch.owner_role
+    return tx
+
+
 def commit_rows(
     batch: LedgerImportBatch,
     rows: list[LedgerImportRow],
@@ -51,11 +57,20 @@ def commit_rows(
 
     for row in rows:
         status = str(row.review_status or "").strip().lower()
-        if status not in COMMIT_ELIGIBLE_STATUSES:
+        if status not in COMMIT_ELIGIBLE_REVIEW_STATUSES:
             skipped_count += 1
             continue
+
+        existing = existing_map.get(int(row.id))
+        if existing:
+            sync_existing_transaction_linkage(existing, batch, row)
+            row.review_status = COMMITTED_REVIEW_STATUS
+            skipped_count += 1
+            idempotent_row_ids.append(int(row.id))
+            continue
+
         if not row.occurred_at or row.amount is None or not row.direction:
-            row.review_status = "invalid"
+            row.review_status = INVALID_REVIEW_STATUS
             failed_count += 1
             errors.append(
                 {
@@ -66,16 +81,8 @@ def commit_rows(
             )
             continue
 
-        existing = existing_map.get(int(row.id))
-        if existing:
-            sync_transaction_from_row(existing, batch, row)
-            row.review_status = "committed"
-            skipped_count += 1
-            idempotent_row_ids.append(int(row.id))
-            continue
-
-        tx = sync_transaction_from_row(LedgerTransaction(), batch, row)
-        row.review_status = "committed"
+        tx = build_transaction_from_row(LedgerTransaction(), batch, row)
+        row.review_status = COMMITTED_REVIEW_STATUS
         created_count += 1
         transactions.append(tx)
         committed_row_ids.append(int(row.id))
@@ -105,7 +112,7 @@ def upsert_merchant_from_rows(
     sync_ids = sync_row_ids or counted_ids
 
     for row in rows:
-        if row.review_status != "committed" or int(row.id) not in sync_ids:
+        if row.review_status != COMMITTED_REVIEW_STATUS or int(row.id) not in sync_ids:
             continue
         canonical = (row.merchant_normalized or row.merchant_raw or "").strip()
         if not canonical:

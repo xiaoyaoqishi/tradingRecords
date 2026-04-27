@@ -27,8 +27,12 @@ import {
 import PageHeader from '../components/PageHeader'
 import ReviewDetailPanel from '../components/ReviewDetailPanel'
 import ReviewTable from '../components/ReviewTable'
-
-const COMMIT_ELIGIBLE_STATUSES = new Set(['confirmed', 'approved', 'accepted'])
+import {
+  COMMITTED_BATCH_READONLY_MESSAGE,
+  COMMITTED_BATCH_STATUS,
+  COMMIT_ELIGIBLE_REVIEW_STATUSES,
+  REVIEW_STATUSES,
+} from '../constants/ledgerReview'
 
 export default function ImportReviewPage() {
   const navigate = useNavigate()
@@ -85,27 +89,29 @@ export default function ImportReviewPage() {
     load()
   }, [batchId])
 
+  const batchCommitted = batch?.status === COMMITTED_BATCH_STATUS
+
   const isRowPendingRecognition = (row) => !row?.source_channel || !row?.merchant_normalized || !row?.category_id
 
   const filteredRows = useMemo(() => {
     return allRows.filter((row) => {
       if (statusFilter === 'all') return true
       if (statusFilter === 'unrecognized') return isRowPendingRecognition(row)
-      if (statusFilter === 'committable') return COMMIT_ELIGIBLE_STATUSES.has(row.review_status)
+      if (statusFilter === 'committable') return COMMIT_ELIGIBLE_REVIEW_STATUSES.has(row.review_status)
       return row.review_status === statusFilter
     })
   }, [allRows, statusFilter])
 
   const counts = useMemo(() => {
-    const committable = allRows.filter((x) => COMMIT_ELIGIBLE_STATUSES.has(x.review_status)).length
-    const pending = allRows.filter((x) => x.review_status === 'pending').length
-    const duplicate = allRows.filter((x) => x.review_status === 'duplicate').length
+    const committable = allRows.filter((x) => COMMIT_ELIGIBLE_REVIEW_STATUSES.has(x.review_status)).length
+    const pending = allRows.filter((x) => x.review_status === REVIEW_STATUSES.PENDING).length
+    const duplicate = allRows.filter((x) => x.review_status === REVIEW_STATUSES.DUPLICATE).length
     const identified = allRows.filter((x) => !isRowPendingRecognition(x)).length
     const unrecognized = allRows.filter((x) => isRowPendingRecognition(x)).length
     const highConfidenceReady = allRows.filter(
       (x) =>
         Number(x.confidence || 0) >= Number(highConfidenceThreshold || 0) &&
-        x.review_status === 'pending' &&
+        x.review_status === REVIEW_STATUSES.PENDING &&
         !x.duplicate_type,
     ).length
     return { committable, pending, duplicate, identified, unrecognized, highConfidenceReady }
@@ -123,13 +129,13 @@ export default function ImportReviewPage() {
 
   const selectedEditableCount = useMemo(() => {
     const selected = new Set(selectedRowKeys)
-    return allRows.filter((x) => selected.has(x.id) && x.review_status !== 'duplicate').length
+    return allRows.filter((x) => selected.has(x.id) && x.review_status !== REVIEW_STATUSES.DUPLICATE).length
   }, [allRows, selectedRowKeys])
   const highConfidenceRowIds = useMemo(() => {
     return allRows
       .filter(
         (x) =>
-          x.review_status === 'pending' &&
+          x.review_status === REVIEW_STATUSES.PENDING &&
           !x.duplicate_type &&
           Number(x.confidence || 0) >= Number(highConfidenceThreshold || 0),
       )
@@ -172,6 +178,10 @@ export default function ImportReviewPage() {
       message.warning('请先勾选记录，再生成规则')
       return
     }
+    if (batchCommitted) {
+      message.warning(COMMITTED_BATCH_READONLY_MESSAGE)
+      return
+    }
     const selectedRows = allRows.filter((x) => rowIds.includes(x.id))
     const defaults = inferRuleDefaults(selectedRows)
     setRuleKind('merchant')
@@ -190,6 +200,10 @@ export default function ImportReviewPage() {
   }
 
   const handlePreviewRules = async () => {
+    if (batchCommitted) {
+      message.warning(COMMITTED_BATCH_READONLY_MESSAGE)
+      return
+    }
     if (!ruleTargetRowIds.length) return
     if (ruleKind === 'category' || ruleKind === 'merchant_and_category') {
       if (!ruleTargetCategoryName) {
@@ -230,6 +244,10 @@ export default function ImportReviewPage() {
   }
 
   const handleCreateRules = async () => {
+    if (batchCommitted) {
+      message.warning(COMMITTED_BATCH_READONLY_MESSAGE)
+      return
+    }
     if (!ruleTargetRowIds.length) return
     if (ruleKind === 'category' || ruleKind === 'merchant_and_category') {
       if (!ruleTargetCategoryName) {
@@ -331,6 +349,13 @@ export default function ImportReviewPage() {
         showIcon
         message="校对台提交只会处理 confirmed / approved / accepted 行；pending / ignored / rejected / duplicate 不会入账。"
       />
+      {batchCommitted ? (
+        <Alert
+          type="error"
+          showIcon
+          message={COMMITTED_BATCH_READONLY_MESSAGE}
+        />
+      ) : null}
       {parseOnlyRows > 0 ? (
         <Alert
           type="error"
@@ -364,7 +389,7 @@ export default function ImportReviewPage() {
             addonBefore="高置信阈值"
           />
           <Button
-            disabled={!highConfidenceRowIds.length}
+            disabled={batchCommitted || !highConfidenceRowIds.length}
             onClick={async () => {
               setLoading(true)
               try {
@@ -406,7 +431,7 @@ export default function ImportReviewPage() {
           </Button>
           <Tag color="processing">当前已选可操作 {selectedEditableCount} 条</Tag>
           <Button
-            disabled={!selectedRowKeys.length}
+            disabled={batchCommitted || !selectedRowKeys.length}
             onClick={openRuleModal}
           >
             从勾选记录生成规则
@@ -418,6 +443,7 @@ export default function ImportReviewPage() {
         <Space wrap size={12} style={{ marginBottom: 12 }}>
           <Button onClick={load} loading={loading}>刷新</Button>
           <Button
+            disabled={batchCommitted}
             onClick={async () => {
               setLoading(true)
               try {
@@ -432,6 +458,7 @@ export default function ImportReviewPage() {
             对当前批次重放规则
           </Button>
           <Button
+            disabled={batchCommitted}
             onClick={async () => {
               setLoading(true)
               try {
@@ -447,7 +474,7 @@ export default function ImportReviewPage() {
           </Button>
           <Button
             type="primary"
-            disabled={counts.committable <= 0}
+            disabled={batchCommitted || counts.committable <= 0}
             onClick={async () => {
               setLoading(true)
               try {
@@ -492,8 +519,8 @@ export default function ImportReviewPage() {
         onCancel={() => setRuleModalOpen(false)}
         width={920}
         footer={[
-          <Button key="preview" onClick={handlePreviewRules} loading={ruleSubmitting}>预览命中范围</Button>,
-          <Button key="create" type="primary" onClick={handleCreateRules} loading={ruleSubmitting}>确认创建并重识别未确认</Button>,
+          <Button key="preview" onClick={handlePreviewRules} loading={ruleSubmitting} disabled={batchCommitted}>预览命中范围</Button>,
+          <Button key="create" type="primary" onClick={handleCreateRules} loading={ruleSubmitting} disabled={batchCommitted}>确认创建并重识别未确认</Button>,
         ]}
       >
         <Space direction="vertical" style={{ width: '100%' }}>

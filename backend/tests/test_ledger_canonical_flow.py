@@ -90,8 +90,9 @@ def test_commit_import_batch_only_commits_confirmed_rows_and_is_idempotent(admin
         assert tx.description
         assert tx.confidence_score is not None
 
+        tx.merchant_normalized = "三津汤包-人工修正"
         committed_row.review_status = "confirmed"
-        committed_row.merchant_normalized = "三津汤包-已修正"
+        committed_row.merchant_normalized = "三津汤包-导入侧再次变化"
         db.commit()
 
     second_commit = admin_login.post(f"/api/ledger/import-batches/{batch_id}/commit")
@@ -105,7 +106,7 @@ def test_commit_import_batch_only_commits_confirmed_rows_and_is_idempotent(admin
     with _session() as db:
         txs = db.query(LedgerTransaction).filter(LedgerTransaction.batch_id == batch_id).all()
         assert len(txs) == 1
-        assert txs[0].merchant_normalized == "三津汤包-已修正"
+        assert txs[0].merchant_normalized == "三津汤包-人工修正"
 
 
 def test_delete_import_batch_rolls_back_committed_transactions(admin_login):
