@@ -1,49 +1,58 @@
 # Ledger Smoke Checklist
 
-## 1. 前置条件
-- 已启动本地服务：`./dev.sh up`
-- 可正常登录系统账号（至少一个可写数据账号）
-- `frontend-ledger` 已完成构建验证：`cd frontend-ledger && npm run build`
-- 若验证生产配置，服务器已执行 `deploy/update.sh`
+## Preconditions
+- Backend dependencies are installed.
+- Frontend dependencies are installed.
+- Build verification:
+  - `cd frontend-ledger && npm run build`
+- API regression check:
+  - `cd backend && python3 -m pytest -q tests/test_ledger_import_pipeline.py`
 
-## 2. 手工验收步骤
-1. 打开门户首页 `/`，确认存在“账务管理”入口卡片。
-2. 点击“账务管理”进入 `/ledger/`，应自动落到 `/ledger/dashboard`。
-3. 打开账户页 `/ledger/accounts`，新建一个账户（如“现金钱包”）。
-4. 打开分类页 `/ledger/categories`，新建一个支出分类（如“餐饮”）。
-5. 打开流水页 `/ledger/transactions`，新增一条 `income` 流水。
-6. 新增一条 `expense` 流水（绑定上一步分类）。
-7. 再新增一条 `transfer` 流水（转出账户与对方账户不同）。
-8. 回到 `/ledger/dashboard`，确认汇总卡片和最近流水发生变化。
-9. 跳回 `/ledger/transactions`，按 `transaction_type=transfer` 筛选，应有结果。
-10. 编辑任一流水并保存，列表应保持当前筛选状态。
-11. 删除一条流水，删除后列表刷新且该条目消失。
-12. 打开 `/ledger/import`，上传一份 CSV，完成“预览导入”并“确认导入”。
-13. 导入完成后跳转到流水页，筛选 `source=import_csv` 可看到新导入记录。
-14. 打开 `/ledger/rules`，新建一条规则（如 `merchant_contains=coffee`，动作设置支出分类）。
-15. 在 `/ledger/import` 导入一条命中该规则的记录，预览页需显示命中规则摘要。
-16. 提交后到 `/ledger/transactions`，确认分类已自动补全。
-17. 打开 `/ledger/recurring`，新增一条 monthly 周期规则，确认列表出现且有 `next_due_date`。
-18. 点击“识别候选”，使用 `lookback_days=180`、`min_occurrences=3` 执行识别，确认返回候选列表。
-19. 将任一候选“转为规则”，确认规则表单自动预填 merchant/amount/frequency 等字段。
-20. 在提醒区对某条规则执行“生成草案”，应跳转 `/ledger/transactions` 并自动打开预填新增表单。
-21. 保存该草案为真实流水后，返回 `/ledger/recurring`，确认 overview/reminders 计数有更新。
-22. 返回门户 `/`，再次点击“账务管理”，页面应正常打开。
+## Frontend Smoke (Phase 3 MVP)
+1. Open `/ledger/`, should redirect to `/ledger/imports`.
+2. In Import Center (`/ledger/imports`):
+   - Upload `csv/xls/xlsx` file and create a new batch.
+   - Run `parse -> classify -> dedupe` from row actions.
+   - Note: duplicate tagging is currently disabled by default, duplicate count may stay `0`.
+   - Confirm batch list columns are visible: file/source/status/total/pending/duplicate/confirmed.
+3. Click "进入校对台" and open `/ledger/imports/{id}/review`:
+   - Table shows: date/amount/raw text/source/platform/merchant/category/confidence.
+   - Source/platform/category/status display labels should be Chinese (no raw enum values like `wechat` / `wechat_pay` / `alipay` in table columns).
+   - Header dropdown filters for summary/source/platform/merchant/category are available, sorted by frequency and showing counts.
+4. In review workbench:
+   - Filter pending and duplicate by status tabs.
+   - Use table header filters and verify fuzzy search in dropdown options.
+   - Adjust high-confidence threshold and click `一键确认高阈值`, verify pending rows are batch-confirmed.
+   - Select one or more unresolved rows, click `从勾选记录生成规则`.
+   - Verify modal has no `目标分类编号` input; use `目标分类` Chinese dropdown.
+   - Click `预览命中范围`, verify estimated hit count and sample list.
+   - Select re-identify scope (`重识别未确认` or `重识别全部记录`), then click confirm and verify table refresh.
+   - Category dropdown should include `其他`; rule type should include `来源/平台规则`.
+   - Verify commit button is enabled only when `confirmed > 0`, then commit.
+5. Open Merchant Dictionary (`/ledger/merchants`):
+   - Verify canonical name / aliases / default category / hit count are rendered.
+6. Open Rules Management (`/ledger/rules`):
+   - Verify list includes existing rules.
+   - Create one rule, edit it, then delete it.
+   - Verify the deleted rule no longer appears in the list.
 
-## 3. 期望结果
-- 所有页面可访问且刷新不 404（重点验证 `/ledger/dashboard`）。
-- 新增/编辑/删除流水可成功落库并反映在 Dashboard。
-- 交易筛选可稳定返回结果，URL 参数刷新后可保留关键筛选。
-- CSV 导入支持字段映射、预览状态（有效/重复/无效）与提交统计反馈。
-- 周期账单支持规则 CRUD、候选识别、提醒分组（即将到期/已逾期/金额异常）与草案生成。
-- 未登录访问 `/ledger/*` 会跳转 `/login`，登录后可回到原目标页。
+## API Smoke (Phase 2 Features)
+1. `POST /api/ledger/import-batches/{id}/review/bulk-category`
+2. `POST /api/ledger/import-batches/{id}/review/bulk-merchant`
+3. `POST /api/ledger/import-batches/{id}/review/bulk-confirm`
+4. `POST /api/ledger/import-batches/{id}/review/generate-rule`
+5. `POST /api/ledger/import-batches/{id}/commit`
+6. `GET /api/ledger/categories`
 
-## 4. 常见失败排查
-- 访问 `/ledger/*` 404：检查 `deploy/nginx.conf` 是否包含 `location /ledger/` 及 `try_files ... /ledger/index.html`。
-- 门户无“账务管理”卡片：检查 `portal/index.html` 是否已同步到部署目录 `/opt/tradingRecords/portal/index.html`。
-- portal 点击 `/ledger/` 无法打开：检查 `frontend-ledger` 是否已构建并存在 `frontend-ledger/dist`。
-- 本地 portal 代理不通：检查 `portal/dev_server.py` 是否配置了 `/ledger/` 上游，默认端口 `5176`。
-- 登录后未回跳：检查 URL 是否带 `redirect=/ledger/...`，并确认登录成功返回 200。
-- Dashboard 页面加载但图表区空白：确认有支出类流水且分类未被删除。
-- CSV 导入后没有记录：检查映射是否覆盖 `occurred_at/amount/transaction_type/account_name` 等关键字段。
-- 审计上报报错：`/api/audit/track` 失败不会阻断页面，属于可容忍降级。
+## Pass Criteria
+- Import Center / Review Workbench / Merchant Dictionary routes are reachable.
+- Import review table is usable as the primary workflow.
+- Explain and duplicate evidence are visible and traceable.
+- At least one bulk review action succeeds.
+- Rule generation from selected rows is directly usable without category-id input.
+- Commit button state matches confirmed-row count.
+
+## Current Scope / Not In This Phase
+- This phase does not include AI fallback enhancement.
+- This phase does not include analytics/report pages refactor.
+- Legacy ledger pages are downgraded and no longer primary entry.

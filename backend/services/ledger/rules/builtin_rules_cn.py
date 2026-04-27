@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+
+BUILTIN_RULES_CN: list[dict] = [
+    # source layer
+    {"rule_type": "source", "priority": 10, "pattern": "财付通", "target_platform": "wechat", "target_txn_kind": "expense", "target_scene": "wechat_payment", "confidence_score": 0.95, "explain_text": "命中财付通，识别微信体系"},
+    {"rule_type": "source", "priority": 10, "pattern": "微信支付", "target_platform": "wechat", "target_txn_kind": "expense", "target_scene": "wechat_payment", "confidence_score": 0.95, "explain_text": "命中微信支付，识别微信体系"},
+    {"rule_type": "source", "priority": 10, "pattern": "支付宝", "target_platform": "alipay", "target_txn_kind": "expense", "target_scene": "alipay_payment", "confidence_score": 0.95, "explain_text": "命中支付宝，识别支付宝体系"},
+    {"rule_type": "source", "priority": 9, "pattern": "京东支付-京东商城-", "target_platform": "jd", "target_txn_kind": "expense", "target_scene": "jd_payment", "confidence_score": 0.97, "explain_text": "命中京东支付，识别京东体系"},
+    {"rule_type": "source", "priority": 9, "pattern": "拼多多支付-拼多多平台商户", "target_platform": "pinduoduo", "target_txn_kind": "expense", "target_scene": "pdd_payment", "confidence_score": 0.97, "explain_text": "命中拼多多支付，识别拼多多体系"},
+    {"rule_type": "source", "priority": 10, "pattern": "美团支付", "target_platform": "meituan", "target_txn_kind": "expense", "target_scene": "meituan_payment", "confidence_score": 0.92, "explain_text": "命中美团支付，识别美团体系"},
+    {"rule_type": "source", "priority": 12, "pattern": "转账", "target_txn_kind": "transfer", "target_scene": "transfer", "confidence_score": 0.86, "explain_text": "命中转账关键词"},
+    {"rule_type": "source", "priority": 12, "pattern": "还款", "target_txn_kind": "repayment", "target_scene": "repayment", "confidence_score": 0.88, "explain_text": "命中还款关键词"},
+    {"rule_type": "source", "priority": 12, "pattern": "退款", "target_txn_kind": "refund", "target_scene": "refund", "confidence_score": 0.88, "explain_text": "命中退款关键词"},
+    {"rule_type": "source", "priority": 12, "pattern": "手续费", "target_txn_kind": "fee", "target_scene": "fee", "confidence_score": 0.90, "explain_text": "命中手续费关键词"},
+    {"rule_type": "source", "priority": 12, "pattern": "工资", "target_txn_kind": "income", "target_scene": "salary", "confidence_score": 0.85, "explain_text": "命中工资关键词"},
+
+    # merchant normalize layer
+    {"rule_type": "merchant", "priority": 20, "pattern": "财付通-微信支付-罗森", "target_merchant": "罗森", "confidence_score": 0.95, "explain_text": "归一到罗森"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "微信支付 罗森", "target_merchant": "罗森", "confidence_score": 0.95, "explain_text": "归一到罗森"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "罗森便利店", "target_merchant": "罗森", "confidence_score": 0.95, "explain_text": "归一到罗森"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "美宜佳", "target_merchant": "美宜佳", "confidence_score": 0.94, "explain_text": "归一到美宜佳"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "7-eleven", "target_merchant": "7-Eleven", "confidence_score": 0.94, "explain_text": "归一到7-Eleven"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "全家", "target_merchant": "全家", "confidence_score": 0.94, "explain_text": "归一到全家"},
+
+    {"rule_type": "merchant", "priority": 20, "pattern": "京东", "target_merchant": "京东", "confidence_score": 0.92, "explain_text": "归一到京东"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "拼多多", "target_merchant": "拼多多", "confidence_score": 0.92, "explain_text": "归一到拼多多"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "淘宝", "target_merchant": "淘宝", "confidence_score": 0.92, "explain_text": "归一到淘宝"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "天猫", "target_merchant": "天猫", "confidence_score": 0.92, "explain_text": "归一到天猫"},
+
+    {"rule_type": "merchant", "priority": 20, "pattern": "美团外卖", "target_merchant": "美团外卖", "confidence_score": 0.93, "explain_text": "归一到美团外卖"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "美团单车", "target_merchant": "美团单车", "confidence_score": 0.93, "explain_text": "归一到美团单车"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "饿了么", "target_merchant": "饿了么", "confidence_score": 0.90, "explain_text": "归一到饿了么"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "滴滴", "target_merchant": "滴滴", "confidence_score": 0.90, "explain_text": "归一到滴滴"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "深圳通", "target_merchant": "深圳通", "confidence_score": 0.95, "explain_text": "归一到深圳通"},
+
+    {"rule_type": "merchant", "priority": 18, "pattern": "福州朴朴电子商务有限公司", "target_merchant": "朴朴", "confidence_score": 0.98, "explain_text": "公司名归一到朴朴"},
+    {"rule_type": "merchant", "priority": 18, "pattern": "朴朴电子商务", "target_merchant": "朴朴", "confidence_score": 0.97, "explain_text": "公司名归一到朴朴"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "朴朴", "target_merchant": "朴朴", "confidence_score": 0.92, "explain_text": "归一到朴朴"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "盒马", "target_merchant": "盒马", "confidence_score": 0.92, "explain_text": "归一到盒马"},
+
+    {"rule_type": "merchant", "priority": 18, "pattern": "农耕记湖南土菜", "target_merchant": "农耕记", "confidence_score": 0.96, "explain_text": "门店名归一到农耕记"},
+    {"rule_type": "merchant", "priority": 18, "pattern": "农耕记", "target_merchant": "农耕记", "confidence_score": 0.95, "explain_text": "归一到农耕记"},
+    {"rule_type": "merchant", "priority": 18, "pattern": "三津汤包", "target_merchant": "三津汤包", "confidence_score": 0.96, "explain_text": "归一到三津汤包"},
+    {"rule_type": "merchant", "priority": 18, "pattern": "青海牛腩面馆", "target_merchant": "青海牛腩面馆", "confidence_score": 0.95, "explain_text": "归一到青海牛腩面馆"},
+
+    {"rule_type": "merchant", "priority": 20, "pattern": "深圳燃气", "target_merchant": "深圳燃气", "confidence_score": 0.95, "explain_text": "归一到深圳燃气"},
+    {"rule_type": "merchant", "priority": 20, "pattern": "深圳航空", "target_merchant": "深圳航空", "confidence_score": 0.95, "explain_text": "归一到深圳航空"},
+
+    # category layer
+    {"rule_type": "category", "priority": 28, "pattern": "美团单车", "target_scene": "交通", "confidence_score": 0.95, "explain_text": "优先命中单车，覆盖美团支付泛匹配"},
+    {"rule_type": "category", "priority": 28, "pattern": "买药", "target_scene": "医疗候选", "confidence_score": 0.72, "explain_text": "命中买药，标记医疗候选"},
+
+    {"rule_type": "category", "priority": 30, "pattern": "深圳通", "target_scene": "公共交通", "confidence_score": 0.95, "explain_text": "深圳通归入公共交通"},
+    {"rule_type": "category", "priority": 30, "pattern": "京东", "target_scene": "购物", "confidence_score": 0.92, "explain_text": "京东归入购物"},
+    {"rule_type": "category", "priority": 30, "pattern": "拼多多", "target_scene": "购物", "confidence_score": 0.92, "explain_text": "拼多多归入购物"},
+    {"rule_type": "category", "priority": 30, "pattern": "淘宝", "target_scene": "购物", "confidence_score": 0.92, "explain_text": "淘宝归入购物"},
+    {"rule_type": "category", "priority": 30, "pattern": "天猫", "target_scene": "购物", "confidence_score": 0.92, "explain_text": "天猫归入购物"},
+    {"rule_type": "category", "priority": 30, "pattern": "美团外卖", "target_scene": "餐饮", "confidence_score": 0.93, "explain_text": "美团外卖归入餐饮"},
+    {"rule_type": "category", "priority": 30, "pattern": "美团支付-美团app", "target_scene": "餐饮", "confidence_score": 0.9, "explain_text": "美团支付App门店默认归餐饮"},
+    {"rule_type": "category", "priority": 30, "pattern": "饿了么", "target_scene": "餐饮", "confidence_score": 0.93, "explain_text": "饿了么归入餐饮"},
+    {"rule_type": "category", "priority": 30, "pattern": "滴滴", "target_scene": "出行", "confidence_score": 0.92, "explain_text": "滴滴归入出行"},
+    {"rule_type": "category", "priority": 30, "pattern": "朴朴", "target_scene": "买菜/商超", "confidence_score": 0.90, "explain_text": "朴朴归入买菜/商超"},
+    {"rule_type": "category", "priority": 30, "pattern": "盒马", "target_scene": "买菜/商超", "confidence_score": 0.90, "explain_text": "盒马归入买菜/商超"},
+    {"rule_type": "category", "priority": 30, "pattern": "深圳燃气", "target_scene": "公用事业", "confidence_score": 0.95, "explain_text": "深圳燃气归入公用事业"},
+    {"rule_type": "category", "priority": 30, "pattern": "深圳航空", "target_scene": "出行", "confidence_score": 0.95, "explain_text": "深圳航空归入出行"},
+
+    {"rule_type": "category", "priority": 35, "pattern": "罗森", "target_scene": "便利店", "confidence_score": 0.87, "explain_text": "罗森归入便利店"},
+    {"rule_type": "category", "priority": 35, "pattern": "美宜佳", "target_scene": "便利店", "confidence_score": 0.87, "explain_text": "美宜佳归入便利店"},
+    {"rule_type": "category", "priority": 35, "pattern": "7-eleven", "target_scene": "便利店", "confidence_score": 0.87, "explain_text": "7-Eleven归入便利店"},
+    {"rule_type": "category", "priority": 35, "pattern": "全家", "target_scene": "便利店", "confidence_score": 0.87, "explain_text": "全家归入便利店"},
+    {"rule_type": "category", "priority": 35, "pattern": "便利", "source_channel_condition": "wechat", "target_scene": "便利店", "confidence_score": 0.84, "explain_text": "微信支付命中便利关键词，归入便利店"},
+    {"rule_type": "category", "priority": 35, "pattern": "商店", "source_channel_condition": "wechat", "target_scene": "便利店", "confidence_score": 0.84, "explain_text": "微信支付命中商店关键词，归入便利店"},
+    {"rule_type": "category", "priority": 35, "pattern": "百货", "source_channel_condition": "wechat", "target_scene": "便利店", "confidence_score": 0.84, "explain_text": "微信支付命中百货关键词，归入便利店"},
+    {"rule_type": "category", "priority": 35, "pattern": "商行", "source_channel_condition": "wechat", "target_scene": "便利店", "confidence_score": 0.84, "explain_text": "微信支付命中商行关键词，归入便利店"},
+    {"rule_type": "category", "priority": 35, "pattern": "烟酒茶", "source_channel_condition": "wechat", "target_scene": "便利店", "confidence_score": 0.84, "explain_text": "微信支付命中烟酒茶关键词，归入便利店"},
+    {"rule_type": "category", "priority": 35, "pattern": "易站", "source_channel_condition": "wechat", "target_scene": "便利店", "confidence_score": 0.84, "explain_text": "微信支付命中易站关键词，归入便利店"},
+    {"rule_type": "category", "priority": 26, "pattern": "转账", "target_scene": "转账", "confidence_score": 0.9, "explain_text": "命中转账关键词，归入转账"},
+
+    {"rule_type": "category", "priority": 38, "pattern": "面馆", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "餐饮关键词命中"},
+    {"rule_type": "category", "priority": 38, "pattern": "汤包", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "餐饮关键词命中"},
+    {"rule_type": "category", "priority": 38, "pattern": "烧烤", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "餐饮关键词命中"},
+    {"rule_type": "category", "priority": 38, "pattern": "奶茶", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "餐饮关键词命中"},
+    {"rule_type": "category", "priority": 38, "pattern": "咖啡", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "餐饮关键词命中"},
+    {"rule_type": "category", "priority": 38, "pattern": "饭店", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "餐饮关键词命中"},
+    {"rule_type": "category", "priority": 38, "pattern": "餐厅", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "餐饮关键词命中"},
+    {"rule_type": "category", "priority": 38, "pattern": "土菜", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "餐饮关键词命中"},
+    {"rule_type": "category", "priority": 38, "pattern": "厨房", "source_channel_condition": "wechat", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "微信支付命中厨房关键词，归入餐饮"},
+    {"rule_type": "category", "priority": 38, "pattern": "面", "source_channel_condition": "wechat", "target_scene": "餐饮", "confidence_score": 0.8, "explain_text": "微信支付命中面关键词，归入餐饮"},
+    {"rule_type": "category", "priority": 38, "pattern": "肉", "source_channel_condition": "wechat", "target_scene": "餐饮", "confidence_score": 0.8, "explain_text": "微信支付命中肉关键词，归入餐饮"},
+    {"rule_type": "category", "priority": 38, "pattern": "汤", "source_channel_condition": "wechat", "target_scene": "餐饮", "confidence_score": 0.8, "explain_text": "微信支付命中汤关键词，归入餐饮"},
+    {"rule_type": "category", "priority": 38, "pattern": "快餐", "source_channel_condition": "wechat", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "微信支付命中快餐关键词，归入餐饮"},
+    {"rule_type": "category", "priority": 38, "pattern": "小吃", "source_channel_condition": "wechat", "target_scene": "餐饮", "confidence_score": 0.82, "explain_text": "微信支付命中小吃关键词，归入餐饮"},
+    {"rule_type": "category", "priority": 38, "pattern": "粉", "source_channel_condition": "wechat", "target_scene": "餐饮", "confidence_score": 0.8, "explain_text": "微信支付命中粉关键词，归入餐饮"},
+    {"rule_type": "category", "priority": 24, "pattern": "鑫海", "source_channel_condition": "wechat", "target_scene": "房租", "confidence_score": 0.92, "explain_text": "命中鑫海关键词，归入房租"},
+]

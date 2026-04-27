@@ -187,9 +187,47 @@ def _ensure_sqlite_column(db: Session, table: str, column: str, ddl_fragment: st
         db.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_fragment}"))
 
 
+def _rebuild_ledger_schema_if_incompatible(db: Session) -> bool:
+    # Breaking-change migration for ledger module:
+    # if legacy tables conflict with new schema (e.g. missing ledger_rules.rule_type),
+    # rebuild ledger tables because module is not yet in production.
+    if not _table_exists(db, "ledger_rules"):
+        return False
+
+    rule_cols = _column_names(db, "ledger_rules")
+    required_rule_cols = {
+        "rule_type",
+        "priority",
+        "enabled",
+        "match_mode",
+        "pattern",
+        "target_txn_kind",
+        "target_scene",
+    }
+    if required_rule_cols.issubset(rule_cols):
+        return False
+
+    db.execute(text("PRAGMA foreign_keys = OFF"))
+    for table in (
+        "ledger_transactions",
+        "ledger_import_rows",
+        "ledger_import_batches",
+        "ledger_rules",
+        "ledger_merchants",
+        "ledger_categories",
+    ):
+        if _table_exists(db, table):
+            db.execute(text(f"DROP TABLE IF EXISTS {table}"))
+    db.commit()
+    db.execute(text("PRAGMA foreign_keys = ON"))
+    Base.metadata.create_all(bind=engine)
+    return True
+
+
 def _migrate_legacy_schema():
     db = SessionLocal()
     try:
+        _rebuild_ledger_schema_if_incompatible(db)
         if _table_exists(db, "users"):
             user_cols = _column_names(db, "users")
             if "password_hash" not in user_cols:

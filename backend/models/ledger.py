@@ -1,27 +1,8 @@
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from core.db import Base
-
-
-class LedgerAccount(Base):
-    __tablename__ = "ledger_accounts"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(120), nullable=False, index=True)
-    account_type = Column(String(20), nullable=False, index=True)
-    currency = Column(String(10), nullable=False, default="CNY")
-    initial_balance = Column(Float, nullable=False, default=0)
-    is_active = Column(Boolean, nullable=False, default=True)
-    notes = Column(Text)
-    owner_role = Column(String(20), default="admin", index=True)
-    is_deleted = Column(Boolean, default=False, index=True)
-    deleted_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    transactions = relationship("LedgerTransaction", foreign_keys="LedgerTransaction.account_id", back_populates="account")
 
 
 class LedgerCategory(Base):
@@ -30,7 +11,7 @@ class LedgerCategory(Base):
     id = Column(Integer, primary_key=True, index=True)
     parent_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
     name = Column(String(120), nullable=False, index=True)
-    category_type = Column(String(20), nullable=False, index=True)
+    category_type = Column(String(20), nullable=False, index=True, default="expense")
     sort_order = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
     owner_role = Column(String(20), default="admin", index=True)
@@ -42,64 +23,49 @@ class LedgerCategory(Base):
     parent = relationship("LedgerCategory", remote_side=[id], backref="children", uselist=False)
 
 
-class LedgerTransaction(Base):
-    __tablename__ = "ledger_transactions"
+class LedgerImportBatch(Base):
+    __tablename__ = "ledger_import_batches"
 
     id = Column(Integer, primary_key=True, index=True)
-    occurred_at = Column(DateTime, nullable=False, index=True)
-    posted_date = Column(Date, nullable=True, index=True)
-    account_id = Column(Integer, ForeignKey("ledger_accounts.id"), nullable=False, index=True)
-    counterparty_account_id = Column(Integer, ForeignKey("ledger_accounts.id"), nullable=True, index=True)
-    category_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
-    direction = Column(String(20), nullable=False, index=True)
-    transaction_type = Column(String(30), nullable=False, index=True)
-    amount = Column(Float, nullable=False)
-    currency = Column(String(10), nullable=False, default="CNY")
-    merchant = Column(String(200), nullable=True, index=True)
-    description = Column(Text, nullable=True)
-    note = Column(Text, nullable=True)
-    external_ref = Column(String(120), nullable=True, index=True)
-    source = Column(String(30), nullable=False, default="manual")
-    linked_transaction_id = Column(Integer, ForeignKey("ledger_transactions.id"), nullable=True, index=True)
-    recurring_rule_id = Column(Integer, ForeignKey("ledger_recurring_rules.id"), nullable=True, index=True)
-    is_cleared = Column(Boolean, nullable=False, default=False)
+    source_type = Column(String(40), nullable=False, default="unknown", index=True)
+    file_name = Column(String(255), nullable=False)
+    file_hash = Column(String(64), nullable=False, index=True)
+    file_path = Column(String(500), nullable=False)
+    status = Column(String(30), nullable=False, default="uploaded", index=True)
+    total_rows = Column(Integer, nullable=False, default=0)
+    parsed_rows = Column(Integer, nullable=False, default=0)
+    matched_rows = Column(Integer, nullable=False, default=0)
+    review_rows = Column(Integer, nullable=False, default=0)
+    duplicate_rows = Column(Integer, nullable=False, default=0)
     owner_role = Column(String(20), default="admin", index=True)
-    is_deleted = Column(Boolean, default=False, index=True)
-    deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    account = relationship("LedgerAccount", foreign_keys=[account_id], back_populates="transactions")
-    counterparty_account = relationship("LedgerAccount", foreign_keys=[counterparty_account_id])
-    category = relationship("LedgerCategory")
-    linked_transaction = relationship("LedgerTransaction", remote_side=[id], uselist=False)
-    recurring_rule = relationship("LedgerRecurringRule", back_populates="transactions", foreign_keys=[recurring_rule_id])
-
-
-class LedgerImportTemplate(Base):
-    __tablename__ = "ledger_import_templates"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(120), nullable=False, index=True)
-    delimiter = Column(String(10), nullable=False, default=",")
-    encoding = Column(String(20), nullable=False, default="utf-8")
-    mapping_json = Column(Text, nullable=False, default="{}")
-    owner_role = Column(String(20), default="admin", index=True)
-    is_deleted = Column(Boolean, default=False, index=True)
-    deleted_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    rows = relationship("LedgerImportRow", back_populates="batch", cascade="all, delete-orphan")
 
 
 class LedgerRule(Base):
     __tablename__ = "ledger_rules"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(120), nullable=False, index=True)
-    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    rule_type = Column(String(40), nullable=False, index=True)
     priority = Column(Integer, nullable=False, default=100, index=True)
-    match_json = Column(Text, nullable=False, default="{}")
-    action_json = Column(Text, nullable=False, default="{}")
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    match_mode = Column(String(20), nullable=False, default="contains")
+    pattern = Column(String(255), nullable=False)
+    source_channel_condition = Column(String(50), nullable=True, index=True)
+    platform_condition = Column(String(50), nullable=True, index=True)
+    direction_condition = Column(String(20), nullable=True, index=True)
+    amount_min = Column(Float, nullable=True)
+    amount_max = Column(Float, nullable=True)
+    target_platform = Column(String(50), nullable=True)
+    target_merchant = Column(String(200), nullable=True)
+    target_txn_kind = Column(String(40), nullable=True)
+    target_scene = Column(String(80), nullable=True)
+    target_category_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
+    target_subcategory_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
+    explain_text = Column(String(255), nullable=True)
+    confidence_score = Column(Float, nullable=False, default=0.7)
     owner_role = Column(String(20), default="admin", index=True)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True)
@@ -107,42 +73,108 @@ class LedgerRule(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
-class LedgerRecurringRule(Base):
-    __tablename__ = "ledger_recurring_rules"
+class LedgerMerchant(Base):
+    __tablename__ = "ledger_merchants"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(120), nullable=False, index=True)
-    is_active = Column(Boolean, nullable=False, default=True, index=True)
-    rule_type = Column(String(30), nullable=False, index=True)
-    frequency = Column(String(20), nullable=False, index=True)
-    interval_count = Column(Integer, nullable=False, default=1)
-    day_of_month = Column(Integer, nullable=True)
-    weekday = Column(Integer, nullable=True)
-    start_date = Column(Date, nullable=False, index=True)
-    end_date = Column(Date, nullable=True, index=True)
-    expected_amount = Column(Float, nullable=True)
-    amount_tolerance = Column(Float, nullable=True)
-    currency = Column(String(10), nullable=False, default="CNY")
-    account_id = Column(Integer, ForeignKey("ledger_accounts.id"), nullable=False, index=True)
-    counterparty_account_id = Column(Integer, ForeignKey("ledger_accounts.id"), nullable=True, index=True)
-    category_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
-    transaction_type = Column(String(30), nullable=False, index=True)
-    direction = Column(String(20), nullable=False, index=True)
-    merchant = Column(String(200), nullable=True, index=True)
-    description = Column(Text, nullable=True)
-    note = Column(Text, nullable=True)
-    source_hint = Column(String(30), nullable=True)
-    last_matched_transaction_id = Column(Integer, ForeignKey("ledger_transactions.id"), nullable=True, index=True)
-    last_matched_at = Column(DateTime, nullable=True, index=True)
-    next_due_date = Column(Date, nullable=True, index=True)
+    canonical_name = Column(String(200), nullable=False, index=True)
+    aliases_json = Column(Text, nullable=False, default="[]")
+    default_category_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
+    default_subcategory_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
+    tags_json = Column(Text, nullable=False, default="[]")
+    hit_count = Column(Integer, nullable=False, default=0)
     owner_role = Column(String(20), default="admin", index=True)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    account = relationship("LedgerAccount", foreign_keys=[account_id])
-    counterparty_account = relationship("LedgerAccount", foreign_keys=[counterparty_account_id])
-    category = relationship("LedgerCategory")
-    last_matched_transaction = relationship("LedgerTransaction", foreign_keys=[last_matched_transaction_id])
-    transactions = relationship("LedgerTransaction", back_populates="recurring_rule", foreign_keys=[LedgerTransaction.recurring_rule_id])
+
+class LedgerImportRow(Base):
+    __tablename__ = "ledger_import_rows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(Integer, ForeignKey("ledger_import_batches.id"), nullable=False, index=True)
+    row_index = Column(Integer, nullable=False)
+    account_id = Column(Integer, nullable=True, index=True)
+    raw_payload_json = Column(Text, nullable=False, default="{}")
+    raw_text = Column(Text, nullable=True)
+    normalized_text = Column(Text, nullable=True)
+    text_fingerprint = Column(String(64), nullable=True, index=True)
+    occurred_at = Column(DateTime, nullable=True, index=True)
+    occurred_bucket = Column(String(25), nullable=True, index=True)
+    amount = Column(Float, nullable=True)
+    direction = Column(String(20), nullable=True, index=True)
+    balance = Column(Float, nullable=True)
+    source_channel = Column(String(50), nullable=True, index=True)
+    txn_kind = Column(String(40), nullable=True, index=True)
+    scene_candidate = Column(String(80), nullable=True, index=True)
+    platform = Column(String(50), nullable=True, index=True)
+    merchant_raw = Column(String(200), nullable=True, index=True)
+    merchant_normalized = Column(String(200), nullable=True, index=True)
+    merchant_id = Column(Integer, ForeignKey("ledger_merchants.id"), nullable=True, index=True)
+    category_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
+    subcategory_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
+    confidence = Column(Float, nullable=False, default=0.0)
+
+    source_rule_id = Column(Integer, ForeignKey("ledger_rules.id"), nullable=True, index=True)
+    source_confidence = Column(Float, nullable=True)
+    source_explain = Column(String(255), nullable=True)
+
+    merchant_rule_id = Column(Integer, ForeignKey("ledger_rules.id"), nullable=True, index=True)
+    merchant_confidence = Column(Float, nullable=True)
+    merchant_explain = Column(String(255), nullable=True)
+
+    category_rule_id = Column(Integer, ForeignKey("ledger_rules.id"), nullable=True, index=True)
+    category_confidence = Column(Float, nullable=True)
+    category_explain = Column(String(255), nullable=True)
+
+    duplicate_key = Column(String(120), nullable=True, index=True)
+    duplicate_type = Column(String(30), nullable=True, index=True)
+    duplicate_score = Column(Float, nullable=True)
+    duplicate_basis_json = Column(Text, nullable=True)
+
+    review_status = Column(String(30), nullable=False, default="pending", index=True)
+    review_note = Column(Text, nullable=True)
+    low_confidence_reason = Column(String(255), nullable=True)
+    suggested_candidates_json = Column(Text, nullable=True)
+    execution_trace_json = Column(Text, nullable=True)
+
+    owner_role = Column(String(20), default="admin", index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    batch = relationship("LedgerImportBatch", back_populates="rows")
+
+
+class LedgerTransaction(Base):
+    __tablename__ = "ledger_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(Integer, ForeignKey("ledger_import_batches.id"), nullable=True, index=True)
+    import_row_id = Column(Integer, ForeignKey("ledger_import_rows.id"), nullable=True, index=True)
+    account_id = Column(Integer, nullable=True, index=True)
+    occurred_at = Column(DateTime, nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    direction = Column(String(20), nullable=False, index=True)
+    currency = Column(String(10), nullable=False, default="CNY")
+    balance = Column(Float, nullable=True)
+    source_channel = Column(String(50), nullable=True, index=True)
+    txn_kind = Column(String(40), nullable=True, index=True)
+    scene_candidate = Column(String(80), nullable=True, index=True)
+    platform = Column(String(50), nullable=True, index=True)
+    merchant_raw = Column(String(200), nullable=True, index=True)
+    merchant_normalized = Column(String(200), nullable=True, index=True)
+    merchant_id = Column(Integer, ForeignKey("ledger_merchants.id"), nullable=True, index=True)
+    description = Column(Text, nullable=True)
+    normalized_text = Column(Text, nullable=True)
+    text_fingerprint = Column(String(64), nullable=True, index=True)
+    category_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
+    subcategory_id = Column(Integer, ForeignKey("ledger_categories.id"), nullable=True, index=True)
+    duplicate_key = Column(String(120), nullable=True, index=True)
+    review_note = Column(Text, nullable=True)
+    owner_role = Column(String(20), default="admin", index=True)
+    is_deleted = Column(Boolean, default=False, index=True)
+    deleted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

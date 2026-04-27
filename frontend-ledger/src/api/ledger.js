@@ -1,50 +1,43 @@
 import apiClient from './client'
 
-export const listAccounts = () => apiClient.get('/ledger/accounts')
-export const createAccount = (payload) => apiClient.post('/ledger/accounts', payload)
-export const updateAccount = (id, payload) => apiClient.put(`/ledger/accounts/${id}`, payload)
-export const deleteAccount = (id) => apiClient.delete(`/ledger/accounts/${id}`)
-
-export const listCategories = (params) => apiClient.get('/ledger/categories', { params })
-export const createCategory = (payload) => apiClient.post('/ledger/categories', payload)
-export const updateCategory = (id, payload) => apiClient.put(`/ledger/categories/${id}`, payload)
-export const deleteCategory = (id) => apiClient.delete(`/ledger/categories/${id}`)
-
-export const listTransactions = (params) => apiClient.get('/ledger/transactions', { params })
-export const getTransaction = (id) => apiClient.get(`/ledger/transactions/${id}`)
-export const createTransaction = (payload, options = {}) =>
-  apiClient.post('/ledger/transactions', payload, { params: { apply_rules: options.applyRules !== false } })
-export const updateTransaction = (id, payload, options = {}) =>
-  apiClient.put(`/ledger/transactions/${id}`, payload, { params: { apply_rules: options.applyRules !== false } })
-export const deleteTransaction = (id) => apiClient.delete(`/ledger/transactions/${id}`)
-
-export const getDashboard = (params) => apiClient.get('/ledger/dashboard', { params })
-
-export const previewImport = (formData) =>
-  apiClient.post('/ledger/import/preview', formData, {
+export const createImportBatch = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return apiClient.post('/ledger/import-batches', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
+}
 
-export const commitImport = (payload) => apiClient.post('/ledger/import/commit', payload)
+export const listImportBatches = () => apiClient.get('/ledger/import-batches')
+export const listCategories = () => apiClient.get('/ledger/categories')
+export const getImportBatch = (id) => apiClient.get(`/ledger/import-batches/${id}`)
+export const deleteImportBatch = (id) => apiClient.delete(`/ledger/import-batches/${id}`)
+export const parseImportBatch = (id) => apiClient.post(`/ledger/import-batches/${id}/parse`)
+export const classifyImportBatch = (id) => apiClient.post(`/ledger/import-batches/${id}/classify`)
+export const dedupeImportBatch = (id) => apiClient.post(`/ledger/import-batches/${id}/dedupe`)
+export const reprocessImportBatch = (id) => apiClient.post(`/ledger/import-batches/${id}/reprocess`)
+export const listImportReviewRows = (id, params = {}) => apiClient.get(`/ledger/import-batches/${id}/review-rows`, { params })
+export const getImportReviewInsights = (id) => apiClient.get(`/ledger/import-batches/${id}/review-insights`)
+export const commitImportBatch = (id) => apiClient.post(`/ledger/import-batches/${id}/commit`)
 
-export const listImportTemplates = () => apiClient.get('/ledger/import/templates')
-export const createImportTemplate = (payload) => apiClient.post('/ledger/import/templates', payload)
-export const deleteImportTemplate = (id) => apiClient.delete(`/ledger/import/templates/${id}`)
+export const reviewBulkCategory = (id, payload) => apiClient.post(`/ledger/import-batches/${id}/review/bulk-category`, payload)
+export const reviewBulkMerchant = (id, payload) => apiClient.post(`/ledger/import-batches/${id}/review/bulk-merchant`, payload)
+export const reviewBulkConfirm = (id, payload) => apiClient.post(`/ledger/import-batches/${id}/review/bulk-confirm`, payload)
+export const reviewReclassifyPending = (id) => apiClient.post(`/ledger/import-batches/${id}/review/reclassify-pending`)
+export const reviewGenerateRule = (id, payload) => apiClient.post(`/ledger/import-batches/${id}/review/generate-rule`, payload)
+
+export const listMerchants = () => apiClient.get('/ledger/merchants')
+export const createMerchant = (payload) => apiClient.post('/ledger/merchants', payload)
+export const updateMerchant = (id, payload) => apiClient.put(`/ledger/merchants/${id}`, payload)
 
 export const listRules = () => apiClient.get('/ledger/rules')
 export const createRule = (payload) => apiClient.post('/ledger/rules', payload)
 export const updateRule = (id, payload) => apiClient.put(`/ledger/rules/${id}`, payload)
 export const deleteRule = (id) => apiClient.delete(`/ledger/rules/${id}`)
-export const previewRules = (payload) => apiClient.post('/ledger/rules/preview', payload)
-export const reapplyRules = (payload) => apiClient.post('/ledger/rules/reapply', payload)
 
-export const listRecurringRules = (params) => apiClient.get('/ledger/recurring/rules', { params })
-export const createRecurringRule = (payload) => apiClient.post('/ledger/recurring/rules', payload)
-export const updateRecurringRule = (id, payload) => apiClient.put(`/ledger/recurring/rules/${id}`, payload)
-export const deleteRecurringRule = (id) => apiClient.delete(`/ledger/recurring/rules/${id}`)
-export const detectRecurring = (payload) => apiClient.post('/ledger/recurring/detect', payload)
-export const getRecurringReminders = (params) => apiClient.get('/ledger/recurring/reminders', { params })
-export const getRecurringOverview = () => apiClient.get('/ledger/recurring/overview')
-export const generateRecurringDraft = (ruleId, payload = {}) => apiClient.post(`/ledger/recurring/${ruleId}/draft`, payload)
-export const matchRecurringTransaction = (ruleId, transactionId) =>
-  apiClient.post(`/ledger/recurring/${ruleId}/match/${transactionId}`)
+export const getAnalyticsSummary = (params = {}) => apiClient.get('/ledger/analytics/summary', { params })
+export const getAnalyticsCategoryBreakdown = (params = {}) => apiClient.get('/ledger/analytics/category-breakdown', { params })
+export const getAnalyticsPlatformBreakdown = (params = {}) => apiClient.get('/ledger/analytics/platform-breakdown', { params })
+export const getAnalyticsTopMerchants = (params = {}) => apiClient.get('/ledger/analytics/top-merchants', { params })
+export const getAnalyticsMonthlyTrend = (params = {}) => apiClient.get('/ledger/analytics/monthly-trend', { params })
+export const getAnalyticsUnrecognizedBreakdown = (params = {}) => apiClient.get('/ledger/analytics/unrecognized-breakdown', { params })

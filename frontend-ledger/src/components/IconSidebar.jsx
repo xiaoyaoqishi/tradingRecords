@@ -1,25 +1,19 @@
 import { useMemo } from 'react'
 import {
-  BankOutlined,
-  CalendarOutlined,
-  DashboardOutlined,
+  BarChartOutlined,
   ImportOutlined,
   LogoutOutlined,
   SettingOutlined,
-  TagsOutlined,
-  WalletOutlined,
+  ShopOutlined,
 } from '@ant-design/icons'
 import { NavLink, useLocation } from 'react-router-dom'
 import { logout } from '../api/auth'
 
 const navs = [
-  { key: '/dashboard', label: '仪表盘', icon: <DashboardOutlined /> },
-  { key: '/transactions', label: '流水', icon: <WalletOutlined /> },
-  { key: '/import', label: '导入', icon: <ImportOutlined /> },
-  { key: '/rules', label: '规则', icon: <SettingOutlined /> },
-  { key: '/recurring', label: '周期账单', icon: <CalendarOutlined /> },
-  { key: '/accounts', label: '账户', icon: <BankOutlined /> },
-  { key: '/categories', label: '分类', icon: <TagsOutlined /> },
+  { key: '/imports', label: '导入中心', icon: <ImportOutlined /> },
+  { key: '/analytics', label: '基础分析', icon: <BarChartOutlined /> },
+  { key: '/merchants', label: '商户词典', icon: <ShopOutlined /> },
+  { key: '/rules', label: '规则管理', icon: <SettingOutlined /> },
 ]
 
 export default function IconSidebar() {

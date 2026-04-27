@@ -1,277 +1,218 @@
-import json
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
-from core.errors import AppError
-from core.deps import db_session, get_current_role, owner_role_filter_param
+from core.deps import db_session, get_current_role
 from schemas.ledger import (
-    LedgerAccountCreate,
-    LedgerAccountUpdate,
-    LedgerCategoryCreate,
-    LedgerCategoryType,
-    LedgerCategoryUpdate,
-    LedgerImportCommitRequest,
-    LedgerRuleApplyPreviewRequest,
-    LedgerRuleBulkApplyRequest,
+    LedgerMerchantCreate,
+    LedgerMerchantUpdate,
+    LedgerReviewBulkCategoryRequest,
+    LedgerReviewBulkConfirmRequest,
+    LedgerReviewBulkMerchantRequest,
+    LedgerReviewGenerateRuleRequest,
     LedgerRuleCreate,
     LedgerRuleUpdate,
-    LedgerRecurringApplyDraftRequest,
-    LedgerRecurringDetectRequest,
-    LedgerRecurringRuleCreate,
-    LedgerRecurringRuleUpdate,
-    LedgerImportTemplateCreate,
-    LedgerImportPreviewRequest,
-    LedgerTransactionCreate,
-    LedgerTransactionListQuery,
-    LedgerTransactionType,
-    LedgerDirection,
-    LedgerTransactionUpdate,
 )
-from services.ledger import (
-    account_service,
-    category_service,
-    dashboard_service,
-    import_service,
-    recurring_service,
-    rule_service,
-    transaction_service,
-)
+from services.ledger.imports import pipeline
+from services.ledger import analytics_service
+from services.ledger import category_service
 
 router = APIRouter(prefix="/api/ledger", tags=["ledger"])
 
 
-@router.get("/accounts")
-def list_accounts(
-    owner_role: Optional[str] = Depends(owner_role_filter_param),
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return account_service.list_accounts(db, role=role, owner_role=owner_role)
-
-
-@router.post("/accounts")
-def create_account(
-    payload: LedgerAccountCreate,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return account_service.create_account(db, payload, role=role)
-
-
-@router.put("/accounts/{account_id}")
-def update_account(
-    account_id: int,
-    payload: LedgerAccountUpdate,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return account_service.update_account(db, account_id, payload, role=role)
-
-
-@router.delete("/accounts/{account_id}")
-def delete_account(
-    account_id: int,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return account_service.delete_account(db, account_id, role=role)
-
-
 @router.get("/categories")
 def list_categories(
-    category_type: Optional[LedgerCategoryType] = Query(default=None),
-    owner_role: Optional[str] = Depends(owner_role_filter_param),
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    category_type_value = category_type.value if category_type else None
-    return category_service.list_categories(db, role=role, category_type=category_type_value, owner_role=owner_role)
+    payload = category_service.list_categories(db, role=role)
+    items = payload.get("items") or []
+    by_id = {int(x["id"]): {**x, "children": []} for x in items if x.get("id") is not None}
+    roots = []
+    for item in by_id.values():
+        parent_id = item.get("parent_id")
+        if parent_id and int(parent_id) in by_id:
+            by_id[int(parent_id)]["children"].append(item)
+        else:
+            roots.append(item)
+    return {"items": roots, "total": len(roots)}
 
 
-@router.post("/categories")
-def create_category(
-    payload: LedgerCategoryCreate,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return category_service.create_category(db, payload, role=role)
-
-
-@router.put("/categories/{category_id}")
-def update_category(
-    category_id: int,
-    payload: LedgerCategoryUpdate,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return category_service.update_category(db, category_id, payload, role=role)
-
-
-@router.delete("/categories/{category_id}")
-def delete_category(
-    category_id: int,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return category_service.delete_category(db, category_id, role=role)
-
-
-@router.get("/transactions")
-def list_transactions(
-    account_id: Optional[int] = Query(default=None, ge=1),
-    category_id: Optional[int] = Query(default=None, ge=1),
-    transaction_type: Optional[LedgerTransactionType] = Query(default=None),
-    direction: Optional[LedgerDirection] = Query(default=None),
-    keyword: Optional[str] = Query(default=None),
-    source: Optional[str] = Query(default=None),
-    date_from: Optional[date] = Query(default=None),
-    date_to: Optional[date] = Query(default=None),
-    owner_role: Optional[str] = Depends(owner_role_filter_param),
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    query = LedgerTransactionListQuery(
-        account_id=account_id,
-        category_id=category_id,
-        transaction_type=transaction_type,
-        direction=direction,
-        keyword=keyword,
-        source=source,
-        date_from=date_from,
-        date_to=date_to,
-    )
-    return transaction_service.list_transactions(db, role=role, query=query, owner_role=owner_role)
-
-
-@router.post("/transactions")
-def create_transaction(
-    payload: LedgerTransactionCreate,
-    apply_rules: bool = Query(default=True),
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return transaction_service.create_transaction(db, payload, role=role, apply_rules=apply_rules)
-
-
-@router.get("/transactions/{transaction_id}")
-def get_transaction(
-    transaction_id: int,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return transaction_service.get_transaction(db, transaction_id, role=role)
-
-
-@router.put("/transactions/{transaction_id}")
-def update_transaction(
-    transaction_id: int,
-    payload: LedgerTransactionUpdate,
-    apply_rules: bool = Query(default=True),
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return transaction_service.update_transaction(db, transaction_id, payload, role=role, apply_rules=apply_rules)
-
-
-@router.delete("/transactions/{transaction_id}")
-def delete_transaction(
-    transaction_id: int,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return transaction_service.delete_transaction(db, transaction_id, role=role)
-
-
-@router.get("/dashboard")
-def get_dashboard(
-    date_from: Optional[date] = Query(default=None),
-    date_to: Optional[date] = Query(default=None),
-    owner_role: Optional[str] = Depends(owner_role_filter_param),
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return dashboard_service.get_dashboard(
-        db,
-        role=role,
-        owner_role=owner_role,
-        date_from=date_from,
-        date_to=date_to,
-    )
-
-
-@router.post("/import/preview")
-def preview_import(
+@router.post("/import-batches")
+def create_import_batch(
     file: UploadFile = File(...),
-    delimiter: str = Form(","),
-    encoding: str = Form("utf-8"),
-    has_header: bool = Form(True),
-    mapping_json: str = Form("{}"),
-    default_account_id: Optional[int] = Form(default=None, ge=1),
-    default_currency: str = Form("CNY"),
-    default_transaction_type: Optional[LedgerTransactionType] = Form(default=None),
-    default_direction: Optional[LedgerDirection] = Form(default=None),
-    apply_rules: bool = Form(True),
-    preview_limit: int = Form(100),
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    try:
-        mapping = json.loads(mapping_json or "{}")
-    except Exception:
-        raise AppError("invalid_mapping_json", "mapping_json 必须是合法 JSON", status_code=400)
-
-    payload = LedgerImportPreviewRequest(
-        delimiter=delimiter,
-        encoding=encoding,
-        has_header=has_header,
-        mapping=mapping if isinstance(mapping, dict) else {},
-        default_account_id=default_account_id,
-        default_currency=default_currency,
-        default_transaction_type=default_transaction_type,
-        default_direction=default_direction,
-        apply_rules=apply_rules,
-        preview_limit=preview_limit,
-    )
-    csv_bytes = file.file.read()
-    return import_service.preview_import(db, role=role, payload=payload, csv_bytes=csv_bytes)
+    return pipeline.create_import_batch(db, role=role, file_name=file.filename or "upload.csv", file_bytes=file.file.read())
 
 
-@router.post("/import/commit")
-def commit_import(
-    payload: LedgerImportCommitRequest,
+@router.get("/import-batches")
+def list_import_batches(
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return import_service.commit_import(db, role=role, payload=payload)
+    return pipeline.list_import_batches(db, role=role)
 
 
-@router.get("/import/templates")
-def list_import_templates(
+@router.get("/import-batches/{batch_id}")
+def get_import_batch(
+    batch_id: int,
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return import_service.list_import_templates(db, role=role)
+    return pipeline.get_import_batch(db, role=role, batch_id=batch_id)
 
 
-@router.post("/import/templates")
-def create_import_template(
-    payload: LedgerImportTemplateCreate,
+@router.delete("/import-batches/{batch_id}")
+def delete_import_batch(
+    batch_id: int,
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return import_service.create_import_template(db, role=role, payload=payload)
+    return pipeline.delete_import_batch(db, role=role, batch_id=batch_id)
 
 
-@router.delete("/import/templates/{template_id}")
-def delete_import_template(
-    template_id: int,
+@router.post("/import-batches/{batch_id}/parse")
+def parse_import_batch(
+    batch_id: int,
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return import_service.delete_import_template(db, role=role, template_id=template_id)
+    return pipeline.parse_import_batch(db, role=role, batch_id=batch_id)
+
+
+@router.post("/import-batches/{batch_id}/classify")
+def classify_import_batch(
+    batch_id: int,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.classify_import_batch(db, role=role, batch_id=batch_id)
+
+
+@router.post("/import-batches/{batch_id}/dedupe")
+def dedupe_import_batch(
+    batch_id: int,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.dedupe_import_batch(db, role=role, batch_id=batch_id)
+
+
+@router.post("/import-batches/{batch_id}/reprocess")
+def reprocess_import_batch(
+    batch_id: int,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.reprocess_import_batch(db, role=role, batch_id=batch_id)
+
+
+@router.get("/import-batches/{batch_id}/review-rows")
+def list_review_rows(
+    batch_id: int,
+    status: Optional[str] = Query(default=None),
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.list_review_rows(db, role=role, batch_id=batch_id, status=status)
+
+
+@router.get("/import-batches/{batch_id}/review-insights")
+def get_review_insights(
+    batch_id: int,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.get_review_insights(db, role=role, batch_id=batch_id)
+
+
+@router.post("/import-batches/{batch_id}/review/bulk-category")
+def review_bulk_set_category(
+    batch_id: int,
+    payload: LedgerReviewBulkCategoryRequest,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.review_bulk_set_category(db, role=role, batch_id=batch_id, payload=payload)
+
+
+@router.post("/import-batches/{batch_id}/review/bulk-merchant")
+def review_bulk_set_merchant(
+    batch_id: int,
+    payload: LedgerReviewBulkMerchantRequest,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.review_bulk_set_merchant(db, role=role, batch_id=batch_id, payload=payload)
+
+
+@router.post("/import-batches/{batch_id}/review/bulk-confirm")
+def review_bulk_confirm(
+    batch_id: int,
+    payload: LedgerReviewBulkConfirmRequest,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.review_bulk_confirm(db, role=role, batch_id=batch_id, payload=payload)
+
+
+@router.post("/import-batches/{batch_id}/review/reclassify-pending")
+def review_reclassify_pending(
+    batch_id: int,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.review_reclassify_pending(db, role=role, batch_id=batch_id)
+
+
+@router.post("/import-batches/{batch_id}/review/generate-rule")
+def review_generate_rule(
+    batch_id: int,
+    payload: LedgerReviewGenerateRuleRequest,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.review_generate_rule(db, role=role, batch_id=batch_id, payload=payload)
+
+
+@router.post("/import-batches/{batch_id}/commit")
+def commit_import_batch(
+    batch_id: int,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.commit_import_batch(db, role=role, batch_id=batch_id)
+
+
+@router.get("/merchants")
+def list_merchants(
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.list_merchants(db, role=role)
+
+
+@router.post("/merchants")
+def create_merchant(
+    payload: LedgerMerchantCreate,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.create_merchant(db, role=role, payload=payload)
+
+
+@router.put("/merchants/{merchant_id}")
+def update_merchant(
+    merchant_id: int,
+    payload: LedgerMerchantUpdate,
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return pipeline.update_merchant(db, role=role, merchant_id=merchant_id, payload=payload)
 
 
 @router.get("/rules")
@@ -279,7 +220,7 @@ def list_rules(
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return rule_service.list_rules(db, role=role)
+    return pipeline.list_rules(db, role=role)
 
 
 @router.post("/rules")
@@ -288,7 +229,7 @@ def create_rule(
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return rule_service.create_rule(db, role=role, payload=payload)
+    return pipeline.create_rule(db, role=role, payload=payload)
 
 
 @router.put("/rules/{rule_id}")
@@ -298,7 +239,7 @@ def update_rule(
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return rule_service.update_rule(db, role=role, rule_id=rule_id, payload=payload)
+    return pipeline.update_rule(db, role=role, rule_id=rule_id, payload=payload)
 
 
 @router.delete("/rules/{rule_id}")
@@ -307,111 +248,65 @@ def delete_rule(
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return rule_service.delete_rule(db, role=role, rule_id=rule_id)
+    return pipeline.delete_rule(db, role=role, rule_id=rule_id)
 
 
-@router.post("/rules/preview")
-def preview_rules(
-    payload: LedgerRuleApplyPreviewRequest,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return rule_service.preview_rules_on_transactions(db, role=role, payload=payload)
-
-
-@router.post("/rules/reapply")
-def reapply_rules(
-    payload: LedgerRuleBulkApplyRequest,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return rule_service.bulk_apply_rules(db, role=role, payload=payload)
-
-
-@router.get("/recurring/rules")
-def list_recurring_rules(
-    active_only: Optional[bool] = Query(default=None),
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return recurring_service.list_recurring_rules(db, role=role, active_only=active_only)
-
-
-@router.post("/recurring/rules")
-def create_recurring_rule(
-    payload: LedgerRecurringRuleCreate,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return recurring_service.create_recurring_rule(db, role=role, payload=payload)
-
-
-@router.put("/recurring/rules/{rule_id}")
-def update_recurring_rule(
-    rule_id: int,
-    payload: LedgerRecurringRuleUpdate,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return recurring_service.update_recurring_rule(db, role=role, rule_id=rule_id, payload=payload)
-
-
-@router.delete("/recurring/rules/{rule_id}")
-def delete_recurring_rule(
-    rule_id: int,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return recurring_service.delete_recurring_rule(db, role=role, rule_id=rule_id)
-
-
-@router.post("/recurring/detect")
-def detect_recurring(
-    payload: LedgerRecurringDetectRequest,
-    db: Session = Depends(db_session),
-    role: str = Depends(get_current_role),
-):
-    return recurring_service.detect_recurring_candidates(db, role=role, payload=payload)
-
-
-@router.get("/recurring/reminders")
-def recurring_reminders(
+@router.get("/analytics/summary")
+def analytics_summary(
     date_from: Optional[date] = Query(default=None),
     date_to: Optional[date] = Query(default=None),
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return recurring_service.list_recurring_reminders(db, role=role, date_from=date_from, date_to=date_to)
+    return analytics_service.get_summary(db, role=role, date_from=date_from, date_to=date_to)
 
 
-@router.get("/recurring/overview")
-def recurring_overview(
+@router.get("/analytics/category-breakdown")
+def analytics_category_breakdown(
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return recurring_service.get_recurring_overview(db, role=role)
+    return analytics_service.get_category_breakdown(db, role=role, date_from=date_from, date_to=date_to)
 
 
-@router.post("/recurring/{rule_id}/draft")
-def recurring_draft(
-    rule_id: int,
-    payload: LedgerRecurringApplyDraftRequest,
+@router.get("/analytics/platform-breakdown")
+def analytics_platform_breakdown(
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return recurring_service.generate_recurring_draft(
-        db,
-        role=role,
-        rule_id=rule_id,
-        occurred_at=payload.occurred_at,
-    )
+    return analytics_service.get_platform_breakdown(db, role=role, date_from=date_from, date_to=date_to)
 
 
-@router.post("/recurring/{rule_id}/match/{transaction_id}")
-def recurring_match(
-    rule_id: int,
-    transaction_id: int,
+@router.get("/analytics/top-merchants")
+def analytics_top_merchants(
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(db_session),
     role: str = Depends(get_current_role),
 ):
-    return recurring_service.mark_recurring_match(db, role=role, rule_id=rule_id, transaction_id=transaction_id)
+    return analytics_service.get_top_merchants(db, role=role, date_from=date_from, date_to=date_to, limit=limit)
+
+
+@router.get("/analytics/monthly-trend")
+def analytics_monthly_trend(
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return analytics_service.get_monthly_trend(db, role=role, date_from=date_from, date_to=date_to)
+
+
+@router.get("/analytics/unrecognized-breakdown")
+def analytics_unrecognized_breakdown(
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
+    db: Session = Depends(db_session),
+    role: str = Depends(get_current_role),
+):
+    return analytics_service.get_unrecognized_breakdown(db, role=role, date_from=date_from, date_to=date_to)

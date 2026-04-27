@@ -46,13 +46,37 @@
 - 审计日志的采集、列表、筛选和删除。
 
 ### Ledger
-- 账户管理。
-- 分类管理。
-- 流水增删改查，以及按账户、分类、类型、方向、来源、关键词、日期范围筛选。
-- Dashboard 汇总、账户余额和最近流水。
-- CSV 导入预览、确认导入，以及导入模板保存。
-- 自动规则的增删改查、预览和重新应用。
-- 周期账单规则、提醒、候选识别、草稿生成和手工匹配标记。
+- 以导入批次为核心的导入优先记账流程。
+- 先入中间表 `ledger_import_rows`，再进入正式流水，避免直接写入账本。
+- 分层规则引擎（来源识别 -> 商户归一 -> 分类 -> 兜底）与首批中国场景内置规则，且保留逐层命中痕迹。
+- 增强去重：`exact_duplicate` / `probable_duplicate` / `review_duplicate`，综合账户、时间粒度、金额、方向、商户、文本指纹。
+  - 当前默认关闭自动去重标记，避免同商户多次消费被误判为重复。
+- review queue 后端闭环：批量改分类、批量改商户、批量确认、人工修正一键沉淀规则。
+- 导入校对台支持从当前勾选样本直接创建规则（支持商户归一/分类/组合/来源平台规则，不需要填写分类编号，分类下拉含“其他”，可选择重识别未确认或全部记录）。
+- 校对台强化：支持批量勾选、对当前批次重放规则、对待确认重新识别，并将提交入账操作集中在表格上方工具区。
+- 校对台支持高置信阈值可调与“一键确认高阈值”待确认记录。
+- 规则生成强化：支持预览命中范围与预计影响条数、跳过明显重复规则、支持“仅当前来源范围”与“全局”两种生效范围。
+- commit 仅导入 `confirmed` 行，并保留 batch / row / transaction 关联。
+- 导入时间口径统一为“年月日”（导入时不保留时分秒）。
+- 商户词典 `ledger_merchants`（规范名/别名/默认分类/命中次数）支持编辑，并展示最近关联样本。
+- 统一表格读取层支持 `csv/xls/xlsx`（包含 HTML table 风格 `.xls` 导出）。
+- Phase 3 最小可用前端已落地：
+  - 导入中心：`/ledger/imports`
+  - 导入校对台：`/ledger/imports/:batchId/review`
+  - 基础分析页：`/ledger/analytics`
+  - 商户词典页：`/ledger/merchants`
+  - 规则管理页：`/ledger/rules`（支持规则新增/编辑/删除，含命中次数与最近命中时间）
+- 关键接口：
+  - `POST /api/ledger/import-batches`、`GET /api/ledger/import-batches`、`GET /api/ledger/import-batches/{id}`
+  - `POST /api/ledger/import-batches/{id}/parse`、`/classify`、`/dedupe`、`/commit`
+  - `GET /api/ledger/import-batches/{id}/review-rows`、`GET /api/ledger/import-batches/{id}/review-insights`
+  - `POST /api/ledger/import-batches/{id}/review/bulk-category`、`/review/bulk-merchant`、`/review/bulk-confirm`、`/review/reclassify-pending`、`/review/generate-rule`
+  - `GET /api/ledger/categories`
+  - `GET/POST/PUT /api/ledger/merchants`
+  - `GET/POST/PUT/DELETE /api/ledger/rules`
+  - `GET /api/ledger/analytics/summary`、`/analytics/category-breakdown`、`/analytics/platform-breakdown`、`/analytics/top-merchants`、`/analytics/monthly-trend`、`/analytics/unrecognized-breakdown`
+  - 前端已切到导入工作流主入口；Phase 4（AI/报表增强）尚未开始。
+  - 校对台来源渠道、平台、分类、状态等用户可见字段统一中文展示。
 
 ## Quick Start
 ### 前置要求
@@ -95,7 +119,7 @@ npm install
 - `/trading/`：交易前端入口；应用内部会跳转到 `/trading/dashboard`。
 - `/notes/`：笔记工作台入口。
 - `/monitor/`：监控与管理工作台入口。
-- `/ledger/`：账务前端入口；应用内部会跳转到 `/ledger/dashboard`。
+- `/ledger/`：账务前端入口；应用内部会跳转到 `/ledger/imports`。
 - `/api/*`：统一 FastAPI API，覆盖鉴权、交易、笔记、监控、账务、上传等后端能力。
 
 ## 架构概览

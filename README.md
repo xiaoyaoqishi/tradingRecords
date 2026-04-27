@@ -46,13 +46,37 @@
 - Audit log collection, listing, filtering, and deletion.
 
 ### Ledger
-- Account management.
-- Category management.
-- Transaction CRUD with filters for account, category, type, direction, source, keyword, and date range.
-- Dashboard summaries with account balances and recent transactions.
-- CSV import preview and commit flow, plus saved import templates.
-- Auto rules with CRUD, preview, and reapply support.
-- Recurring bill rules, reminders, candidate detection, draft generation, and manual match marking.
+- Import-first bookkeeping pipeline centered on `import batches`.
+- Source detection and row-level staging (`ledger_import_rows`) before final commit.
+- Layered rule engine (source -> merchant normalization -> category -> fallback), with built-in CN rules and per-layer trace.
+- Enhanced dedupe (`exact_duplicate` / `probable_duplicate` / `review_duplicate`) based on account/time/amount/direction/merchant/fingerprint.
+  - Auto duplicate tagging is currently disabled by default to avoid false positives on frequent same-merchant spending.
+- Review queue backend closure: bulk category fix, bulk merchant normalization, bulk confirm, and one-click rule generation from manual fixes.
+- Import review workbench supports creating rules directly from selected samples (merchant/category/both/source-platform, no category-id input, category dropdown includes "其他", hit-range preview, duplicate skipping, and selectable re-identify scope: unconfirmed or all rows).
+- Review workbench hardening: batch selection, replay rules for the current batch, reclassify pending rows, and a table-top action toolbar for refresh/replay/commit.
+- Review workbench supports configurable high-confidence threshold and one-click confirm for high-confidence pending rows.
+- Rule generation hardening: hit-range preview and estimated impact, duplicate-rule skipping, and scope choice between profile-bound and global.
+- Commit only imports `confirmed` rows and keeps batch/row/transaction linkage.
+- Imported datetime is normalized to date-only precision (`YYYY-MM-DD`, no time part).
+- Merchant dictionary (`ledger_merchants`) supports editing canonical name/aliases/default categories and displays recent linked samples.
+- Unified tabular parser supports `csv/xls/xlsx` (including HTML-table style `.xls` exports).
+- Phase 3 MVP frontend now includes:
+  - Import Center (`/ledger/imports`) for batch lifecycle operations.
+  - Import Review Workbench (`/ledger/imports/:batchId/review`) with explain visibility and batch actions.
+  - Basic Analytics page (`/ledger/analytics`).
+  - Merchant Dictionary page (`/ledger/merchants`).
+  - Rules Management page (`/ledger/rules`) with create/edit/delete plus hit count and last hit timestamp.
+- REST APIs:
+  - `POST /api/ledger/import-batches`, `GET /api/ledger/import-batches`, `GET /api/ledger/import-batches/{id}`
+  - `POST /api/ledger/import-batches/{id}/parse`, `/classify`, `/dedupe`, `/commit`
+  - `GET /api/ledger/import-batches/{id}/review-rows`, `GET /api/ledger/import-batches/{id}/review-insights`
+  - `POST /api/ledger/import-batches/{id}/review/bulk-category`, `/review/bulk-merchant`, `/review/bulk-confirm`, `/review/reclassify-pending`, `/review/generate-rule`
+  - `GET /api/ledger/categories`
+  - `GET/POST/PUT /api/ledger/merchants`
+  - `GET/POST/PUT/DELETE /api/ledger/rules`
+  - `GET /api/ledger/analytics/summary`, `/analytics/category-breakdown`, `/analytics/platform-breakdown`, `/analytics/top-merchants`, `/analytics/monthly-trend`, `/analytics/unrecognized-breakdown`
+  - Frontend now uses import-centered workflow as primary entry; Phase 4 (AI/report enhancement) is not started.
+  - User-facing source/platform/category/status values are rendered in Chinese labels in the review workbench.
 
 ## Quick Start
 ### Prerequisites
@@ -95,7 +119,7 @@ Open the portal at `http://127.0.0.1:5172`.
 - `/trading/`: Trading SPA entry; the app redirects to `/trading/dashboard`.
 - `/notes/`: Notes workspace entry.
 - `/monitor/`: Monitor and admin workspace entry.
-- `/ledger/`: Ledger SPA entry; the app redirects to `/ledger/dashboard`.
+- `/ledger/`: Ledger SPA entry; the app redirects to `/ledger/imports`.
 - `/api/*`: Shared FastAPI API for auth, trading, notes, monitor, ledger, uploads, and related services.
 
 ## Architecture Overview

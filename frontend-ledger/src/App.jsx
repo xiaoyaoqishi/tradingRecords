@@ -6,13 +6,11 @@ import LoadingBlock from './components/LoadingBlock'
 import useAuthGuard from './hooks/useAuthGuard'
 import useAuditPageView from './hooks/useAuditPageView'
 
-const Dashboard = lazy(() => import('./pages/Dashboard'))
-const Transactions = lazy(() => import('./pages/Transactions'))
-const ImportTransactions = lazy(() => import('./pages/ImportTransactions'))
-const Rules = lazy(() => import('./pages/Rules'))
-const Recurring = lazy(() => import('./pages/Recurring'))
-const Accounts = lazy(() => import('./pages/Accounts'))
-const Categories = lazy(() => import('./pages/Categories'))
+const ImportBatchesPage = lazy(() => import('./pages/ImportBatchesPage'))
+const ImportReviewPage = lazy(() => import('./pages/ImportReviewPage'))
+const MerchantDictionaryPage = lazy(() => import('./pages/MerchantDictionaryPage'))
+const RulesPage = lazy(() => import('./pages/Rules'))
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 
 function AppLayout() {
   useAuditPageView()
@@ -23,14 +21,12 @@ function AppLayout() {
       <div className="ledger-content-wrap">
         <Suspense fallback={<LoadingBlock text="页面加载中..." />}>
           <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/transactions" element={<Transactions />} />
-            <Route path="/import" element={<ImportTransactions />} />
-            <Route path="/rules" element={<Rules />} />
-            <Route path="/recurring" element={<Recurring />} />
-            <Route path="/accounts" element={<Accounts />} />
-            <Route path="/categories" element={<Categories />} />
+            <Route path="/" element={<Navigate to="/imports" replace />} />
+            <Route path="/imports" element={<ImportBatchesPage />} />
+            <Route path="/imports/:batchId/review" element={<ImportReviewPage />} />
+            <Route path="/merchants" element={<MerchantDictionaryPage />} />
+            <Route path="/rules" element={<RulesPage />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="*" element={<Alert type="warning" showIcon message="页面不存在" />} />
           </Routes>
         </Suspense>

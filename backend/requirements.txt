@@ -7,3 +7,4 @@ psutil
 httpx
 ebooklib
 beautifulsoup4
+xlrd
