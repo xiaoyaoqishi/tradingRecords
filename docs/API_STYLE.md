@@ -10,7 +10,6 @@
 - 路由注册主要使用 `router.add_api_route(...)`。
 - 代表文件包括：
   - `backend/routers/trading.py`
-  - `backend/routers/knowledge.py`
 
 ### 已迁移模块/文件
 
@@ -21,6 +20,7 @@
 - `backend/routers/review.py` 已迁移为模块级 prefix + decorator 风格，当前使用 `prefix="/api/reviews"`。
 - `backend/routers/review_sessions.py` 已迁移为模块级 prefix + decorator 风格，当前使用 `prefix="/api/review-sessions"`。
 - `backend/routers/trade_plans.py` 已迁移为模块级 prefix + decorator 风格，当前使用 `prefix="/api/trade-plans"`。
+- `backend/routers/knowledge.py` 已迁移为模块级 prefix + decorator 风格，当前使用 `prefix="/api/knowledge-items"`。
 
 ### Ledger 风格
 
