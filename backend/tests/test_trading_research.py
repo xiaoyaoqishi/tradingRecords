@@ -73,7 +73,7 @@ def test_trading_research_document_can_reference_multiple_trades(admin_login):
         response = client.post(
             "/api/trades",
             json={
-                "instrument_type": "futures",
+                "instrument_type": "期货",
                 "symbol": symbol,
                 "direction": direction,
                 "open_time": open_time,

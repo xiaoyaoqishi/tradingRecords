@@ -44,6 +44,8 @@ export default function TradeForm() {
   const commissionUsdt = Form.useWatch('commission_usdt', form);
   const pnlUsdt = Form.useWatch('pnl_usdt', form);
   const usdCnyRate = Form.useWatch('usd_cny_rate', form);
+  const closeTime = Form.useWatch('close_time', form);
+  const closePrice = Form.useWatch('close_price', form);
   const [loading, setLoading] = useState(false);
   const [exchangeRateMeta, setExchangeRateMeta] = useState(null);
   const [reviewExists, setReviewExists] = useState(false);
@@ -53,28 +55,35 @@ export default function TradeForm() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEdit = !!id;
+  const isClosed = Boolean(closeTime && closePrice != null);
 
-  const instrumentOptions = instruments.map((item) => ({
-    label: `${item.name}（${item.code}）`,
-    value: item.code,
-    searchText: [item.name, item.code, item.instrument_type, item.category].filter(Boolean).join(' ').toLowerCase(),
-  }));
+  const instrumentOptions = instruments
+    .filter((item) => item.instrument_type === instrumentType)
+    .map((item) => ({
+      label: `${item.name}（${item.code}）`,
+      value: item.code,
+      searchText: [item.name, item.code, item.category].filter(Boolean).join(' ').toLowerCase(),
+    }));
+
+  const handleInstrumentTypeChange = (nextType) => {
+    const currentSymbol = form.getFieldValue('symbol');
+    const currentInstrument = instruments.find((item) => item.code === currentSymbol);
+    if (currentInstrument?.instrument_type !== nextType) {
+      form.setFieldsValue({ symbol: undefined, category: undefined });
+    }
+  };
 
   const instrumentSelect = (
     <Select
       showSearch
       allowClear
-      placeholder="输入品种名称或代码搜索"
+      disabled={!instrumentType}
+      placeholder={instrumentType ? `搜索${instrumentType}品种` : '请先选择交易类型'}
       options={instrumentOptions}
       filterOption={(input, option) => option.searchText.includes(input.trim().toLowerCase())}
       onChange={(code) => {
         const selected = instruments.find((item) => item.code === code);
-        if (selected) {
-          form.setFieldsValue({
-            instrument_type: selected.instrument_type,
-            category: selected.category || undefined,
-          });
-        }
+        form.setFieldValue('category', selected?.category || undefined);
       }}
     />
   );
@@ -199,6 +208,7 @@ export default function TradeForm() {
       if (data.close_time) data.close_time = data.close_time.format('YYYY-MM-DDTHH:mm:ss');
       let tradeId = id;
       if (isEdit) {
+        delete data.category;
         await tradeApi.update(id, data);
       } else {
         const createRes = await tradeApi.create(data);
@@ -231,7 +241,7 @@ export default function TradeForm() {
       message.success(isEdit ? '更新成功' : '创建成功');
       navigate('/trades');
     } catch (e) {
-      message.error('保存失败: ' + (e.response?.data?.detail || e.message));
+      message.error('保存失败: ' + (e.response?.data?.error?.message || e.response?.data?.detail || e.message));
     }
     setLoading(false);
   };
@@ -240,8 +250,8 @@ export default function TradeForm() {
     if (instrumentType !== '加密货币') {
       return (
         <>
-          <Col span={8}><Form.Item label="手续费（人民币）" name="commission"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
-          <Col span={8}><Form.Item label="盈亏金额（人民币）" name="pnl"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
+          <Col span={8}><Form.Item label="手续费（人民币）" name="commission" rules={[{ required: isClosed, message: '已平仓交易请填写手续费' }]}><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
+          <Col span={8}><Form.Item label="盈亏金额（人民币）" name="pnl" rules={[{ required: isClosed, message: '已平仓交易请填写盈亏金额' }]}><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
         </>
       );
     }
@@ -250,8 +260,8 @@ export default function TradeForm() {
     const convertedPnl = pnlUsdt == null || !usdCnyRate ? null : Number(pnlUsdt) * Number(usdCnyRate);
     return (
       <>
-        <Col span={8}><Form.Item label="手续费（USDT）" name="commission_usdt"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
-        <Col span={8}><Form.Item label="盈亏金额（USDT）" name="pnl_usdt"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
+        <Col span={8}><Form.Item label="手续费（USDT）" name="commission_usdt" rules={[{ required: isClosed, message: '已平仓交易请填写手续费' }]}><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
+        <Col span={8}><Form.Item label="盈亏金额（USDT）" name="pnl_usdt" rules={[{ required: isClosed, message: '已平仓交易请填写盈亏金额' }]}><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
         <Col span={8}>
           <Form.Item
             label="美元兑人民币汇率"
@@ -271,6 +281,45 @@ export default function TradeForm() {
     );
   };
 
+  const renderCloseFields = () => (
+    <>
+      <Col span={8}>
+        <Form.Item
+          label="平仓时间"
+          name="close_time"
+          dependencies={['close_price']}
+          rules={[({ getFieldValue }) => ({
+            validator(_, value) {
+              if (getFieldValue('close_price') != null && !value) {
+                return Promise.reject(new Error('填写平仓价后，平仓时间为必填项'));
+              }
+              return Promise.resolve();
+            },
+          })]}
+        >
+          <DatePicker showTime style={{ width: '100%' }} />
+        </Form.Item>
+      </Col>
+      <Col span={8}>
+        <Form.Item
+          label="平仓价"
+          name="close_price"
+          dependencies={['close_time']}
+          rules={[({ getFieldValue }) => ({
+            validator(_, value) {
+              if (getFieldValue('close_time') && value == null) {
+                return Promise.reject(new Error('填写平仓时间后，平仓价为必填项'));
+              }
+              return Promise.resolve();
+            },
+          })]}
+        >
+          <InputNumber style={{ width: '100%' }} />
+        </Form.Item>
+      </Col>
+    </>
+  );
+
   const tabItems = [
     {
       key: '1', label: '成交流水',
@@ -279,16 +328,11 @@ export default function TradeForm() {
         <Row gutter={16}>
           {/* 核心字段 */}
           <Col span={8}>
-            <Form.Item label="交易类型" name="instrument_type" rules={[{ required: true }]}>
-              <Select options={opt(['期货', '加密货币', '股票', '外汇'])} />
+            <Form.Item label="交易类型" name="instrument_type" rules={[{ required: true, message: '请选择交易类型' }]}>
+              <Select options={opt(['期货', '加密货币', '股票', '外汇'])} onChange={handleInstrumentTypeChange} />
             </Form.Item>
           </Col>
           <Col span={8}><Form.Item label="品种" name="symbol" rules={[{ required: true, message: '请选择品种' }]}>{instrumentSelect}</Form.Item></Col>
-          <Col span={8}>
-            <Form.Item label="品种分类" name="category">
-              <Select allowClear options={opt(['黑色', '能化', '有色', '农产品', '股指', '国债', '加密货币', '外汇', '其他'])} />
-            </Form.Item>
-          </Col>
           <Col span={8}>
             <Form.Item label="方向" name="direction" rules={[{ required: true }]}>
               <Select options={[{ label: '做多', value: '做多' }, { label: '做空', value: '做空' }]} />
@@ -300,13 +344,7 @@ export default function TradeForm() {
           <Col span={8}><Form.Item label="当前目标点" name="target_point" rules={[{ required: true, message: '请填写目标点' }]}><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
           <Col span={8}><Form.Item label="占本金百分比" name="capital_percentage" rules={[{ required: true, message: '请填写占本金百分比' }]}><InputNumber style={{ width: '100%' }} min={0} max={100} addonAfter="%" /></Form.Item></Col>
           <Col span={8}><Form.Item label="合约" name="contract"><Input /></Form.Item></Col>
-          <Col span={8}>
-            <Form.Item label="状态" name="status" initialValue="open">
-              <Select options={[{ label: '持仓', value: 'open' }, { label: '已平', value: 'closed' }]} />
-            </Form.Item>
-          </Col>
-          <Col span={8}><Form.Item label="平仓时间" name="close_time"><DatePicker showTime style={{ width: '100%' }} /></Form.Item></Col>
-          <Col span={8}><Form.Item label="平仓价" name="close_price"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
+          {renderCloseFields()}
           <Form.Item shouldUpdate={(prev, curr) => prev.instrument_type !== curr.instrument_type} noStyle>
             {({ getFieldValue }) => {
               const t = getFieldValue('instrument_type');
@@ -343,8 +381,8 @@ export default function TradeForm() {
         <Row gutter={16}>
           {/* 核心必填字段 */}
           <Col span={8}>
-            <Form.Item label="交易类型" name="instrument_type" rules={[{ required: true }]}>
-              <Select options={opt(['期货', '加密货币', '股票', '外汇'])} />
+            <Form.Item label="交易类型" name="instrument_type" rules={[{ required: true, message: '请选择交易类型' }]}>
+              <Select options={opt(['期货', '加密货币', '股票', '外汇'])} onChange={handleInstrumentTypeChange} />
             </Form.Item>
           </Col>
           <Col span={8}><Form.Item label="品种" name="symbol" rules={[{ required: true, message: '请选择品种' }]}>{instrumentSelect}</Form.Item></Col>
@@ -369,13 +407,7 @@ export default function TradeForm() {
           </Form.Item>
 
           <Col span={8}><Form.Item label="合约" name="contract"><Input /></Form.Item></Col>
-          <Col span={8}>
-            <Form.Item label="状态" name="status" initialValue="open">
-              <Select options={[{ label: '持仓', value: 'open' }, { label: '已平', value: 'closed' }]} />
-            </Form.Item>
-          </Col>
-          <Col span={8}><Form.Item label="平仓时间" name="close_time"><DatePicker showTime style={{ width: '100%' }} /></Form.Item></Col>
-          <Col span={8}><Form.Item label="平仓价" name="close_price"><InputNumber style={{ width: '100%' }} /></Form.Item></Col>
+          {renderCloseFields()}
           {renderCurrencyFields()}
         </Row>
       ),

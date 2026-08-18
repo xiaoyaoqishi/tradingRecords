@@ -1,7 +1,7 @@
 def test_trading_read_write(admin_login):
     client = admin_login
     create_payload = {
-        "instrument_type": "futures",
+        "instrument_type": "期货",
         "symbol": "IF",
         "direction": "long",
         "open_time": "2026-04-20T09:30:00",
@@ -74,7 +74,7 @@ def test_trade_requires_initial_risk_points(admin_login):
         "/api/trades",
         json={
             "trade_date": "2026-04-20",
-            "instrument_type": "futures",
+            "instrument_type": "期货",
             "symbol": "IF",
             "direction": "long",
             "open_time": "2026-04-20T09:30:00",
@@ -88,7 +88,7 @@ def test_trade_requires_initial_risk_points(admin_login):
     invalid_percentage = admin_login.post(
         "/api/trades",
         json={
-            "instrument_type": "futures",
+            "instrument_type": "期货",
             "symbol": "IF",
             "direction": "long",
             "open_time": "2026-04-20T09:30:00",
@@ -99,6 +99,114 @@ def test_trade_requires_initial_risk_points(admin_login):
         },
     )
     assert invalid_percentage.status_code == 422
+
+
+def test_trade_update_derives_status_and_requires_complete_close_fields(admin_login):
+    created = admin_login.post(
+        "/api/trades",
+        json={
+            "instrument_type": "期货",
+            "symbol": "AUTO_STATUS_IF",
+            "direction": "long",
+            "open_time": "2026-04-20T09:30:00",
+            "open_price": 3500,
+            "stop_loss_point": 3480,
+            "target_point": 3550,
+            "capital_percentage": 12.5,
+        },
+    )
+    assert created.status_code == 200
+    trade_id = created.json()["id"]
+
+    status_only = admin_login.put(f"/api/trades/{trade_id}", json={"status": "closed"})
+    assert status_only.status_code == 200
+    assert status_only.json()["status"] == "open"
+
+    close_time_only = admin_login.put(
+        f"/api/trades/{trade_id}",
+        json={"close_time": "2026-04-20T14:30:00"},
+    )
+    assert close_time_only.status_code == 400
+    assert "平仓时间和平仓价必须同时填写" in close_time_only.json()["error"]["message"]
+
+    close_price_only = admin_login.put(f"/api/trades/{trade_id}", json={"close_price": 3560})
+    assert close_price_only.status_code == 400
+
+    missing_close_amounts = admin_login.put(
+        f"/api/trades/{trade_id}",
+        json={"close_time": "2026-04-20T14:30:00", "close_price": 3560},
+    )
+    assert missing_close_amounts.status_code == 400
+    assert "手续费和盈亏金额" in missing_close_amounts.json()["error"]["message"]
+
+    closed = admin_login.put(
+        f"/api/trades/{trade_id}",
+        json={
+            "close_time": "2026-04-20T14:30:00",
+            "close_price": 3560,
+            "commission": 5,
+            "pnl": 55,
+            "status": "open",
+        },
+    )
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "closed"
+
+    reopened = admin_login.put(
+        f"/api/trades/{trade_id}",
+        json={"close_time": None, "close_price": None, "status": "closed"},
+    )
+    assert reopened.status_code == 200
+    assert reopened.json()["status"] == "open"
+
+
+def test_trade_create_derives_status_and_requires_close_amounts(admin_login):
+    payload = {
+        "instrument_type": "期货",
+        "symbol": "CREATE_AUTO_STATUS_IF",
+        "direction": "long",
+        "open_time": "2026-04-20T09:30:00",
+        "open_price": 3500,
+        "stop_loss_point": 3480,
+        "target_point": 3550,
+        "capital_percentage": 12.5,
+    }
+
+    ignored_manual_status = admin_login.post("/api/trades", json={**payload, "status": "closed"})
+    assert ignored_manual_status.status_code == 200
+    assert ignored_manual_status.json()["status"] == "open"
+
+    incomplete_close = admin_login.post(
+        "/api/trades",
+        json={**payload, "close_time": "2026-04-20T14:30:00"},
+    )
+    assert incomplete_close.status_code == 400
+    assert "平仓时间和平仓价必须同时填写" in incomplete_close.json()["error"]["message"]
+
+    missing_amounts = admin_login.post(
+        "/api/trades",
+        json={
+            **payload,
+            "close_time": "2026-04-20T14:30:00",
+            "close_price": 3560,
+        },
+    )
+    assert missing_amounts.status_code == 400
+    assert "手续费和盈亏金额" in missing_amounts.json()["error"]["message"]
+
+    closed = admin_login.post(
+        "/api/trades",
+        json={
+            **payload,
+            "close_time": "2026-04-20T14:30:00",
+            "close_price": 3560,
+            "commission": 0,
+            "pnl": 0,
+            "status": "open",
+        },
+    )
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "closed"
 
 
 def test_crypto_trade_stores_usdt_and_uses_cny_for_analytics(admin_login):

@@ -9,7 +9,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from core.db import get_db
-from models import Trade, TradeReview, TradeSourceMetadata
+from models import Trade, TradeInstrument, TradeReview, TradeSourceMetadata
 from models.review import TradePlan, TradePlanTradeLink
 from schemas import (
     TradeCreate,
@@ -361,7 +361,27 @@ def list_trade_search_options(
 
 
 def create_trade(trade: TradeCreate, db: Session = Depends(get_db)):
-    values = normalize_trade_currency_values(trade.model_dump())
+    values = trade.model_dump()
+    instrument = db.query(TradeInstrument).filter(
+        TradeInstrument.code == (values.get("symbol") or "").strip().upper(),
+        TradeInstrument.is_active == True,  # noqa: E712
+    ).first()
+    if instrument and values.get("instrument_type") != instrument.instrument_type:
+        raise HTTPException(400, "所选品种不属于当前交易类型")
+    close_time = values.get("close_time")
+    close_price = values.get("close_price")
+    if (close_time is None) != (close_price is None):
+        raise HTTPException(400, "平仓时间和平仓价必须同时填写或同时留空")
+    values["status"] = "closed" if close_time is not None else "open"
+    if values["status"] == "closed":
+        amount_fields = (
+            ("commission_usdt", "pnl_usdt")
+            if values.get("instrument_type") == "加密货币"
+            else ("commission", "pnl")
+        )
+        if any(field not in trade.model_fields_set or values.get(field) is None for field in amount_fields):
+            raise HTTPException(400, "已平仓交易必须填写手续费和盈亏金额")
+    values = normalize_trade_currency_values(values)
     obj = Trade(**values, owner_role=legacy_runtime._owner_role_value_for_create())
     db.add(obj)
     db.flush()
@@ -382,9 +402,36 @@ def update_trade(trade_id: int, data: TradeUpdate, db: Session = Depends(get_db)
     row = db.query(Trade).filter(Trade.id == trade_id, Trade.is_deleted == False).first()  # noqa: E712
     if not row:
         raise HTTPException(404, "Trade not found")
-    updates = normalize_trade_currency_values(data.model_dump(exclude_unset=True), current=row)
+    updates = data.model_dump(exclude_unset=True)
+    next_symbol = updates.get("symbol", row.symbol)
+    instrument = db.query(TradeInstrument).filter(
+        TradeInstrument.code == (next_symbol or "").strip().upper(),
+        TradeInstrument.is_active == True,  # noqa: E712
+    ).first()
+    next_instrument_type = updates.get("instrument_type", row.instrument_type)
+    if instrument and next_instrument_type != instrument.instrument_type:
+        raise HTTPException(400, "所选品种不属于当前交易类型")
+    updates = normalize_trade_currency_values(updates, current=row)
     if updates.get("open_time") is not None:
         updates["trade_date"] = updates["open_time"].date()
+    next_close_time = updates.get("close_time", row.close_time)
+    next_close_price = updates.get("close_price", row.close_price)
+    if (next_close_time is None) != (next_close_price is None):
+        raise HTTPException(400, "平仓时间和平仓价必须同时填写或同时留空")
+    updates["status"] = "closed" if next_close_time is not None else "open"
+    if updates["status"] == "closed":
+        if next_instrument_type == "加密货币":
+            amount_values = (
+                updates.get("commission_usdt", row.commission_usdt),
+                updates.get("pnl_usdt", row.pnl_usdt),
+            )
+        else:
+            amount_values = (
+                updates.get("commission", row.commission),
+                updates.get("pnl", row.pnl),
+            )
+        if any(value is None for value in amount_values):
+            raise HTTPException(400, "已平仓交易必须填写手续费和盈亏金额")
     tracked_fields = ("stop_loss_point", "target_point", "capital_percentage")
     for field in tracked_fields:
         if field in updates and updates[field] is None:

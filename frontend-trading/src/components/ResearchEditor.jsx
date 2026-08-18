@@ -18,6 +18,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import { generateHTML } from '@tiptap/core';
 import api from '../api';
+import ResearchCollapsible from './ResearchCollapsible';
 import ResearchResizableImage from './ResearchResizableImage';
 
 const lowlight = createLowlight(common);
@@ -117,6 +118,7 @@ function Toolbar({ editor }) {
           <button type="button" key={size} onClick={() => run(() => editor.chain().focus().setMark('textStyle', { fontSize: size }).run())}><span style={{ fontSize: size }}>{size.replace('px', '')}</span></button>
         ))}</div> : null}
       </div>
+      {button('折叠', () => editor.chain().focus().insertResearchCollapsible().run(), editor.isActive('researchCollapsible'), '插入折叠内容')}
       <i className="research-toolbar-divider" />
       {button('B', () => editor.chain().focus().toggleBold().run(), editor.isActive('bold'), '加粗')}
       {button('I', () => editor.chain().focus().toggleItalic().run(), editor.isActive('italic'), '斜体')}
@@ -191,6 +193,7 @@ function createExtensions() {
     Color,
     FontFamily,
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
+    ResearchCollapsible,
     ResearchResizableImage,
     Link.configure({ openOnClick: false }),
     Highlight.configure({ multicolor: true }),

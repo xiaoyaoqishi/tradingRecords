@@ -349,6 +349,80 @@
 .research-rich-content li[data-type='taskItem'],
 .research-reader-content li[data-type='taskItem'] { display: flex; gap: 7px; }
 
+.research-collapsible,
+.research-reader-content details[data-research-collapse] {
+  margin: 12px 0;
+  overflow: hidden;
+  border: 1px solid var(--td-color-border);
+  border-radius: 8px;
+  background: var(--td-color-surface);
+}
+.research-collapsible > summary,
+.research-reader-content details[data-research-collapse] > summary {
+  padding: 9px 12px;
+  background: var(--td-color-surface-muted);
+  color: var(--td-color-text);
+  font-size: 0.9em;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+.research-collapsible-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--td-color-primary);
+  background: var(--td-color-primary);
+  color: var(--td-color-bg);
+  font-size: 0.9em;
+  font-weight: 700;
+}
+.research-collapse-content,
+.research-reader-content details[data-research-collapse] > [data-collapse-content] { padding: 8px 12px 12px; }
+.research-collapse-content > :first-child,
+.research-reader-content details[data-research-collapse] > [data-collapse-content] > :first-child { margin-top: 0; }
+.research-collapse-content > :last-child,
+.research-reader-content details[data-research-collapse] > [data-collapse-content] > :last-child { margin-bottom: 0; }
+.research-collapse-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.research-collapse-toggle:hover { color: var(--td-color-text); background: var(--td-color-accent); }
+.research-collapse-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  caret-color: currentColor;
+  cursor: text;
+  user-select: text;
+}
+.research-collapse-title-input:hover,
+.research-collapse-title-input:focus {
+  border-color: var(--td-color-border);
+  background: var(--td-color-surface);
+  color: var(--td-color-text);
+}
+.research-collapse-title-input:focus { border-color: var(--td-color-bg); caret-color: var(--td-color-primary); }
+
 .research-resizable-image-wrapper { display: inline-block; }
 .research-resizable-image { display: inline-block; position: relative; max-width: 100%; }
 .research-resizable-image img { width: 100%; display: block; }

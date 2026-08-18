@@ -5,7 +5,7 @@ def test_recycle_trade_restore_chain(admin_login):
     client = admin_login
     payload = {
         "trade_date": "2026-04-20",
-        "instrument_type": "futures",
+        "instrument_type": "期货",
         "symbol": "RECYCLE_FLOW",
         "direction": "long",
         "open_time": datetime.utcnow().replace(microsecond=0).isoformat(),

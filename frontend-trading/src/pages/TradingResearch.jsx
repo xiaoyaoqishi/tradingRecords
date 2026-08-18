@@ -39,6 +39,7 @@ function sanitizeResearchHtml(raw) {
   if (typeof window === 'undefined') return raw || '';
   const doc = new DOMParser().parseFromString(raw || '', 'text/html');
   doc.querySelectorAll('script,style,iframe,object,embed').forEach((node) => node.remove());
+  doc.querySelectorAll('details[data-research-collapse]').forEach((node) => node.removeAttribute('open'));
   doc.querySelectorAll('*').forEach((node) => {
     Array.from(node.attributes).forEach((attribute) => {
       const name = attribute.name.toLowerCase();
